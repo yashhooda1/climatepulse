@@ -58,3 +58,14 @@ Bronze–Silver–Gold architecture
 
 🚀 How to Run
 python main.py
+
+
+### Architecture Diagram
+
+# Bronze (Raw NOAA CSV)
+    ↓
+# Silver (Feature Engineering: tmean, winter_year, 80°F flag)
+    ↓
+# Gold (Monthly + Winter Aggregations)
+    ↓
+# Regression Trend Analysis
