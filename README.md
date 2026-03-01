@@ -2,6 +2,15 @@ ClimatePulse 🌎
 
 An end-to-end climate analytics pipeline comparing long-term temperature trends between Houston (IAH) and Newark (EWR) using NOAA GHCN Daily data (1970–2025).
 
+## 📊 Executive Summary
+
+Using 55 years of NOAA daily station data (1970–2025):
+
+- Houston annual warming: +0.805°F per decade
+- Newark annual warming: +0.472°F per decade
+- Houston winter nighttime warming: +1.005°F per decade
+- Houston Feb–March 80°F days: +1.721 additional days per decade
+
 🔧 Architecture
 
 Bronze → Silver → Gold pipeline structure:
