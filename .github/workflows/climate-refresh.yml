@@ -1,0 +1,62 @@
+name: ClimatePulse — weekly data refresh
+
+on:
+  schedule:
+    - cron: '0 4 * * 0'   # Every Sunday 04:00 UTC
+  workflow_dispatch:        # Manual trigger
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout climatepulse repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pandas scikit-learn numpy requests
+
+      - name: Run pipeline
+        env:
+          NOAA_TOKEN: ${{ secrets.NOAA_TOKEN }}
+        run: python scripts/climate_pipeline.py
+
+      - name: Validate output exists and is valid JSON
+        run: |
+          python3 -c "
+          import json, sys
+          try:
+              data = json.load(open('public/data/climate_gold.json'))
+              assert 'IAH' in data and 'EWR' in data
+              assert len(data['IAH']['yearly']) > 50
+              assert len(data['EWR']['yearly']) > 50
+              print('✅ Validation passed')
+          except Exception as e:
+              print(f'❌ Validation failed: {e}')
+              sys.exit(1)
+          "
+
+      - name: Push updated gold data to yashhooda repo
+        env:
+          PAT: ${{ secrets.YASHHOODA_PAT }}
+        run: |
+          # Clone the site repo using PAT
+          git clone https://x-access-token:${PAT}@github.com/yashhooda1/yashhooda.git site-repo
+
+          # Copy the validated gold file into it
+          mkdir -p site-repo/public/data
+          cp public/data/climate_gold.json site-repo/public/data/climate_gold.json
+
+          # Commit and push
+          cd site-repo
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/data/climate_gold.json
+          git diff --staged --quiet \
+            || git commit -m "chore: refresh ClimatePulse gold data [skip ci]"
+          git push
