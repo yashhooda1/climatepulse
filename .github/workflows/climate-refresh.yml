@@ -31,7 +31,7 @@ jobs:
           python3 -c "
           import json, sys
           try:
-              data = json.load(open('public/data/climate_gold.json'))
+              data = json.load(open('public_data_climate_gold.json'))
               assert 'IAH' in data and 'EWR' in data
               assert len(data['IAH']['yearly']) > 50
               assert len(data['EWR']['yearly']) > 50
@@ -45,17 +45,12 @@ jobs:
         env:
           PAT: ${{ secrets.YASHHOODA_PAT }}
         run: |
-          # Clone the site repo using PAT
           git clone https://x-access-token:${PAT}@github.com/yashhooda1/yashhooda.git site-repo
-
-          # Copy the validated gold file into it
-          cp public_data_climate_gold.json site-repo public_data_climate_gold.json
-
-          # Commit and push
+          cp public_data_climate_gold.json site-repo/public_data_climate_gold.json
           cd site-repo
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/data/climate_gold.json
+          git add public_data_climate_gold.json
           git diff --staged --quiet \
             || git commit -m "chore: refresh ClimatePulse gold data [skip ci]"
           git push
