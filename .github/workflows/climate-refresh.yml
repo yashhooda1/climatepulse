@@ -49,8 +49,7 @@ jobs:
           git clone https://x-access-token:${PAT}@github.com/yashhooda1/yashhooda.git site-repo
 
           # Copy the validated gold file into it
-          mkdir -p site-repo/public/data
-          cp public/data/climate_gold.json site-repo/public/data/climate_gold.json
+          cp public_data_climate_gold.json site-repo public_data_climate_gold.json
 
           # Commit and push
           cd site-repo
