@@ -1,7 +1,7 @@
 """
 ClimatePulse — Bronze → Silver → Gold pipeline
 Fetches NOAA daily data for Houston (IAH) and Newark (EWR),
-computes warming trends, and writes public/data/climate_gold.json.
+computes warming trends, and writes public_data_climate_gold.json.
 
 Safety: validates output before writing — never commits bad JSON.
 """
@@ -14,7 +14,7 @@ NOAA_TOKEN = os.environ.get("NOAA_TOKEN", "")
 STATIONS   = {"IAH": "USW00012960", "EWR": "USW00014734"}
 START_YEAR = 1970
 END_YEAR   = 2025
-OUT_PATH   = Path(__file__).parent.parent / "public" / "data" / "climate_gold.json"
+OUT_PATH   = Path(__file__).parent.parent / "public_data_climate_gold.json"  # root of repo
 
 # ── Bronze: fetch from NOAA CDO API ─────────────────────────────────────────
 def fetch_noaa(station_id, start, end):
@@ -86,7 +86,7 @@ def compute_gold(daily, station_id):
     y = np.array(ydf["avg_tmean"])
     m, b = np.polyfit(x - x.mean(), y, 1)
     ydf["trend"] = np.round(m * (x - x.mean()) + y.mean(), 2)
-    slope_annual = round(float(m) * 10, 3)  # per decade
+    slope_annual = round(float(m) * 10, 3)
 
     # Winter lows (Dec–Feb) trend
     winter = daily[daily["month"].isin([12, 1, 2])]
@@ -148,7 +148,6 @@ def main():
         df_raw = fetch_noaa(station_id, START_YEAR, END_YEAR)
 
         if df_raw is None or df_raw.empty:
-            # No token or fetch failed — keep existing data for this station
             if existing and label in existing:
                 print(f"  Using existing gold data for {label}")
                 result[label] = existing[label]
@@ -161,13 +160,12 @@ def main():
         print(f"  {label}: {len(daily)} daily rows processed")
 
     if not result:
-        print("No data computed — aborting write to protect existing gold file.")
+        print("No data computed — aborting write.")
         return
 
-    # ── SAFETY: validate before writing ──────────────────────────────────────
     for label in STATIONS:
         if label not in result:
-            print(f"Missing {label} in result — aborting write.")
+            print(f"Missing {label} — aborting write.")
             return
         if not result[label].get("yearly"):
             print(f"Empty yearly data for {label} — aborting write.")
@@ -175,11 +173,10 @@ def main():
 
     result["generated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUT_PATH.write_text(json.dumps(result, indent=2))
-    print(f"\n✅ Gold data written to {OUT_PATH}")
-    print(f"   IAH slope: {result['IAH']['slope_annual']}°F/decade")
-    print(f"   EWR slope: {result['EWR']['slope_annual']}°F/decade")
+    OUT_PATH.write_text(json.dumps(result, separators=(',', ':')))
+    print(f"\n✅ Written to {OUT_PATH}")
+    print(f"   IAH: {result['IAH']['slope_annual']}°F/decade")
+    print(f"   EWR: {result['EWR']['slope_annual']}°F/decade")
 
 if __name__ == "__main__":
     main()
