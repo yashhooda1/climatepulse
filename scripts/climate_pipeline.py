@@ -18,37 +18,37 @@ STATIONS = {
     "IAH": {
         "id":       "USW00012960",
         "name":     "Houston, TX",
-        "units":    "standard",   # Fahrenheit
+        "metric":   False,
         "color":    "#f87171",
     },
     "EWR": {
         "id":       "USW00014734",
         "name":     "Newark, NJ",
-        "units":    "standard",
+        "metric":   False,
         "color":    "#60a5fa",
     },
     "DAL": {
         "id":       "USW00013960",
         "name":     "Dallas, TX",
-        "units":    "standard",
+        "metric":   False,
         "color":    "#facc15",
     },
     "DEN": {
         "id":       "USW00003017",
         "name":     "Denver, CO",
-        "units":    "standard",
+        "metric":   False,
         "color":    "#4ade80",
     },
     "LHR": {
         "id":       "UKM00003772",
         "name":     "London, UK",
-        "units":    "metric",     # Celsius → convert to F
+        "metric":   True,   # NOAA returns tenths-of-Celsius for this station
         "color":    "#c084fc",
     },
     "DEL": {
         "id":       "IN022021900",
         "name":     "Delhi, India",
-        "units":    "metric",
+        "metric":   True,
         "color":    "#fb923c",
     },
 }
@@ -56,7 +56,7 @@ STATIONS = {
 def c_to_f(c): return round(c * 9/5 + 32, 2)
 
 # ── Bronze: fetch one year at a time ────────────────────────────────────────
-def fetch_year(station_id, year, units="standard"):
+def fetch_year(station_id, year, metric=False):
     url     = "https://www.ncei.noaa.gov/cdo-web/api/v2/data"
     headers = {"token": NOAA_TOKEN}
     rows, offset = [], 1
@@ -70,7 +70,7 @@ def fetch_year(station_id, year, units="standard"):
             "enddate":    f"{year}-12-31",
             "limit":      1000,
             "offset":     offset,
-            "units":      units,
+            "units":      "standard",  # always request standard — we handle conversion manually
         }
         for attempt in range(3):
             try:
@@ -100,7 +100,7 @@ def fetch_noaa(station_cfg):
 
     all_rows = []
     for year in range(START_YEAR, END_YEAR + 1):
-        rows = fetch_year(station_cfg["id"], year, station_cfg["units"])
+        rows = fetch_year(station_cfg["id"], year, station_cfg["metric"])
         all_rows.extend(rows)
         print(f"    {year}: {len(rows)} records")
         time.sleep(0.5)
@@ -108,25 +108,26 @@ def fetch_noaa(station_cfg):
     return pd.DataFrame(all_rows) if all_rows else None
 
 # ── Silver: clean, reshape, convert units ───────────────────────────────────
-def process(df, units="standard"):
+def process(df, metric=False):
     df["date"]  = pd.to_datetime(df["date"])
     df["year"]  = df["date"].dt.year
     df["month"] = df["date"].dt.month
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
 
-    # NOAA metric returns tenths of Celsius — divide by 10 then convert
-    if units == "metric":
-        df["value"] = df["value"] / 10.0
+    if metric:
+        # NOAA always stores in tenths of Celsius internally.
+        # When units=standard is requested, US stations return Fahrenheit * 10,
+        # but international stations still return Celsius * 10.
+        # Detect: if max value > 600, it's tenths (divide by 10 first)
+        max_val = df["value"].abs().max()
+        if max_val > 600:
+            df["value"] = df["value"] / 10.0  # tenths of C → C
+        # Now convert C → F
+        df["value"] = df["value"].apply(lambda c: round(c * 9/5 + 32, 2))
 
     tmax  = df[df["datatype"] == "TMAX"][["date","year","month","value"]].rename(columns={"value":"tmax"})
     tmin  = df[df["datatype"] == "TMIN"][["date","year","month","value"]].rename(columns={"value":"tmin"})
     daily = tmax.merge(tmin, on=["date","year","month"], how="inner")
-
-    # Convert to Fahrenheit if metric
-    if units == "metric":
-        daily["tmax"] = daily["tmax"].apply(c_to_f)
-        daily["tmin"] = daily["tmin"].apply(c_to_f)
-
     daily["tmean"] = (daily["tmax"] + daily["tmin"]) / 2
     return daily
 
@@ -216,7 +217,7 @@ def main():
                 print(f"  No data for {code} — skipping")
             continue
 
-        daily = process(df_raw, cfg["units"])
+        daily = process(df_raw, cfg["metric"])
         result[code] = compute_gold(daily, cfg)
         years = sorted(daily["year"].unique())
         print(f"  {code}: {len(daily)} rows, {years[0]}–{years[-1]}")
