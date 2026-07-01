@@ -13,7 +13,7 @@ from datetime import datetime
 NOAA_TOKEN = os.environ.get("NOAA_TOKEN", "")
 STATIONS   = {"IAH": "USW00012960", "EWR": "USW00014734"}
 START_YEAR = 1970
-END_YEAR   = 2025
+END_YEAR   = datetime.utcnow().year  # always fetch up to current year
 OUT_PATH   = Path(__file__).parent.parent / "public_data_climate_gold.json"  # root of repo
 
 # ── Bronze: fetch from NOAA CDO API ─────────────────────────────────────────
