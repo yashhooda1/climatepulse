@@ -107,28 +107,23 @@ def fetch_noaa(station_cfg):
 
     return pd.DataFrame(all_rows) if all_rows else None
 
-# ── Silver: clean, reshape, convert units ───────────────────────────────────
+# ── Silver: clean, reshape ──────────────────────────────────────────────────
+# NOTE: we request units=standard from NOAA, which returns Fahrenheit for
+# ALL stations including international ones. No manual conversion needed.
 def process(df, metric=False):
     df["date"]  = pd.to_datetime(df["date"])
     df["year"]  = df["date"].dt.year
     df["month"] = df["date"].dt.month
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
 
-    if metric:
-        # NOAA always stores in tenths of Celsius internally.
-        # When units=standard is requested, US stations return Fahrenheit * 10,
-        # but international stations still return Celsius * 10.
-        # Detect: if max value > 600, it's tenths (divide by 10 first)
-        max_val = df["value"].abs().max()
-        if max_val > 600:
-            df["value"] = df["value"] / 10.0  # tenths of C → C
-        # Now convert C → F
-        df["value"] = df["value"].apply(lambda c: round(c * 9/5 + 32, 2))
-
     tmax  = df[df["datatype"] == "TMAX"][["date","year","month","value"]].rename(columns={"value":"tmax"})
     tmin  = df[df["datatype"] == "TMIN"][["date","year","month","value"]].rename(columns={"value":"tmin"})
     daily = tmax.merge(tmin, on=["date","year","month"], how="inner")
     daily["tmean"] = (daily["tmax"] + daily["tmin"]) / 2
+
+    # Sanity guard: drop physically impossible values (bad NOAA records)
+    daily = daily[(daily["tmax"] > -60) & (daily["tmax"] < 140)]
+    daily = daily[(daily["tmin"] > -80) & (daily["tmin"] < 120)]
     return daily
 
 # ── Gold: compute stats ──────────────────────────────────────────────────────
