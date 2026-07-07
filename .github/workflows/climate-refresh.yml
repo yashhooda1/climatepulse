@@ -27,6 +27,10 @@ jobs:
           NOAA_TOKEN: ${{ secrets.NOAA_TOKEN }}
         run: python scripts/climate_pipeline.py
 
+      - name: Build hurricane analytics
+        continue-on-error: true
+        run: python scripts/hurricane_pipeline.py
+
       - name: Validate output exists and is valid JSON
         run: |
           python3 -c "
@@ -47,11 +51,12 @@ jobs:
           PAT: ${{ secrets.YASHHOODA_PAT }}
         run: |
           git clone https://x-access-token:${PAT}@github.com/yashhooda1/yashhooda.git site-repo
-          cp public_data_climate_gold.json site-repo/public_data_climate_gold.json
+          cp public_data_climate_gold.json     site-repo/public_data_climate_gold.json
+          cp public_data_hurricanes_gold.json  site-repo/public_data_hurricanes_gold.json
           cd site-repo
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public_data_climate_gold.json
+          git add public_data_climate_gold.json public_data_hurricanes_gold.json
           git diff --staged --quiet \
-            || git commit -m "chore: refresh ClimatePulse gold data [skip ci]"
+            || git commit -m "chore: refresh ClimatePulse + hurricane gold data [skip ci]"
           git push
