@@ -30,6 +30,7 @@ jobs:
       - name: Embed knowledge base into Upstash Vector (RAG layer)
         continue-on-error: true
         env:
+          OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
           UPSTASH_VECTOR_REST_URL:   ${{ secrets.UPSTASH_VECTOR_REST_URL }}
           UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
         run: python scripts/agent_embed.py
