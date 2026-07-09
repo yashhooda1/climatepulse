@@ -56,12 +56,19 @@ def strava_access_token(fetch_post=_post_form):
                             os.environ.get("STRAVA_CLIENT_SECRET"),
                             os.environ.get("STRAVA_REFRESH_TOKEN"))
     if not (cid and secret and refresh):
+        missing = [n for n, v in (("STRAVA_CLIENT_ID", cid), ("STRAVA_CLIENT_SECRET", secret),
+                                  ("STRAVA_REFRESH_TOKEN", refresh)) if not v]
+        print(f"Strava: not connected — missing secret(s): {', '.join(missing)}")
         return None
     tok = fetch_post("https://www.strava.com/oauth/token", {
         "client_id": cid, "client_secret": secret,
         "grant_type": "refresh_token", "refresh_token": refresh,
     })
-    return tok.get("access_token")
+    at = tok.get("access_token")
+    if not at:
+        print(f"Strava: token refresh returned no access_token (check app + 'activity:read_all' scope). "
+              f"Response keys: {list(tok.keys())}")
+    return at
 
 
 def build_running(activities, now):
@@ -105,7 +112,14 @@ def build_coding(events, now):
         if when < cutoff:
             continue
         repo = (ev.get("repo") or {}).get("name", "").split("/")[-1]
-        n = len((ev.get("payload") or {}).get("commits") or [])
+        payload = ev.get("payload") or {}
+        # GitHub's public events feed often returns an abbreviated/empty `commits`
+        # array — `size` is the authoritative commit count for the push.
+        n = payload.get("size")
+        if n is None:
+            n = payload.get("distinct_size")
+        if n is None:
+            n = len(payload.get("commits") or [])
         repo_commits[repo] = repo_commits.get(repo, 0) + n
         total += n
     active = sorted(({"name": r, "commits": c} for r, c in repo_commits.items()),
@@ -123,13 +137,15 @@ def main(strava_fetch=_get, strava_token=None, gh_fetch=_get):
     after = int((now - timedelta(days=7)).timestamp())
 
     # Running
-    running = {"week_miles": 0, "week_runs": 0, "recent": [], "summary": "Running data unavailable this week."}
+    running = {"week_miles": 0, "week_runs": 0, "recent": [],
+               "summary": "Strava not connected — running data unavailable this week."}
     try:
         token = strava_token if strava_token is not None else strava_access_token()
         if token:
             acts = strava_fetch(
                 f"https://www.strava.com/api/v3/athlete/activities?after={after}&per_page=50",
                 headers={"Authorization": f"Bearer {token}", "User-Agent": UA})
+            print(f"Strava: fetched {len(acts) if isinstance(acts, list) else '??'} activity(ies) in the last 7 days")
             running = build_running(acts, now)
     except Exception as e:
         print(f"Strava step failed ({e}) — keeping placeholder.")
@@ -141,6 +157,8 @@ def main(strava_fetch=_get, strava_token=None, gh_fetch=_get):
         if os.environ.get("GITHUB_TOKEN"):
             headers["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
         events = gh_fetch(f"https://api.github.com/users/{GH_USER}/events/public?per_page=100", headers=headers)
+        pushes = sum(1 for e in events if e.get("type") == "PushEvent") if isinstance(events, list) else 0
+        print(f"GitHub: {len(events) if isinstance(events, list) else '??'} public events, {pushes} PushEvent(s)")
         coding = build_coding(events, now)
     except Exception as e:
         print(f"GitHub step failed ({e}) — keeping placeholder.")
