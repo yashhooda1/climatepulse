@@ -1,0 +1,50 @@
+name: Agent context — weekly refresh
+
+# Lives in climatepulse (NOT the deployed site). Refreshes the yashhooda.ai AI
+# agent's live knowledge (Strava running + GitHub coding), pushes the distilled
+# JSON to the site repo, and re-embeds the RAG knowledge base into Upstash Vector.
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'      # Mondays 05:00 UTC — start of training/work week
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build agent context (Strava + GitHub)
+        continue-on-error: true
+        env:
+          STRAVA_CLIENT_ID:     ${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+          STRAVA_REFRESH_TOKEN: ${{ secrets.STRAVA_REFRESH_TOKEN }}
+          GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/agent_context_pipeline.py
+
+      - name: Embed knowledge base into Upstash Vector (RAG layer)
+        continue-on-error: true
+        env:
+          UPSTASH_VECTOR_REST_URL:   ${{ secrets.UPSTASH_VECTOR_REST_URL }}
+          UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
+        run: python scripts/agent_embed.py
+
+      - name: Push agent context to yashhooda repo
+        env:
+          PAT: ${{ secrets.YASHHOODA_PAT }}
+        run: |
+          if [ ! -f agent_context_gold.json ]; then echo "no context file — skipping"; exit 0; fi
+          git clone https://x-access-token:${PAT}@github.com/yashhooda1/yashhooda.git site-repo
+          cp agent_context_gold.json site-repo/agent_context_gold.json
+          cd site-repo
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add agent_context_gold.json
+          git diff --staged --quiet \
+            || git commit -m "chore: refresh AI agent live context (Strava + GitHub) [skip ci]"
+          git push
