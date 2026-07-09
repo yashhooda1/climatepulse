@@ -17,7 +17,7 @@ Secrets (climatepulse repo): STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET,
 STRAVA_REFRESH_TOKEN, and optionally GITHUB_TOKEN (higher rate limit).
 """
 
-import json, os, urllib.request, urllib.parse
+import json, os, urllib.request, urllib.parse, urllib.error
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -52,18 +52,33 @@ def _pace(moving_time_s, meters):
 
 # ── STRAVA ────────────────────────────────────────────────────────────────────
 def strava_access_token(fetch_post=_post_form):
-    cid, secret, refresh = (os.environ.get("STRAVA_CLIENT_ID"),
-                            os.environ.get("STRAVA_CLIENT_SECRET"),
-                            os.environ.get("STRAVA_REFRESH_TOKEN"))
+    # .strip() defends against the #1 cause of 401s: a trailing newline/space
+    # pasted into the secret value.
+    cid     = (os.environ.get("STRAVA_CLIENT_ID") or "").strip()
+    secret  = (os.environ.get("STRAVA_CLIENT_SECRET") or "").strip()
+    refresh = (os.environ.get("STRAVA_REFRESH_TOKEN") or "").strip()
     if not (cid and secret and refresh):
         missing = [n for n, v in (("STRAVA_CLIENT_ID", cid), ("STRAVA_CLIENT_SECRET", secret),
                                   ("STRAVA_REFRESH_TOKEN", refresh)) if not v]
         print(f"Strava: not connected — missing secret(s): {', '.join(missing)}")
         return None
-    tok = fetch_post("https://www.strava.com/oauth/token", {
-        "client_id": cid, "client_secret": secret,
-        "grant_type": "refresh_token", "refresh_token": refresh,
-    })
+    # sanity hint: client_id is a short number, secret/refresh are 40-char hex
+    if not cid.isdigit():
+        print(f"Strava: warning — STRAVA_CLIENT_ID is '{cid[:8]}...' but should be a short number "
+              f"(you may have client_id/secret swapped).")
+    try:
+        tok = fetch_post("https://www.strava.com/oauth/token", {
+            "client_id": cid, "client_secret": secret,
+            "grant_type": "refresh_token", "refresh_token": refresh,
+        })
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:    body = e.read().decode("utf-8", "replace")[:400]
+        except Exception: pass
+        print(f"Strava: token exchange rejected (HTTP {e.code}). Strava says: {body}")
+        print("  → The named field in that error is the wrong one. client_id = short number; "
+              "client_secret & refresh_token = 40-char hex. Re-copy that value from Vercel (no trailing newline).")
+        return None
     at = tok.get("access_token")
     if not at:
         print(f"Strava: token refresh returned no access_token (check app + 'activity:read_all' scope). "
