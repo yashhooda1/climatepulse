@@ -35,6 +35,12 @@ jobs:
         continue-on-error: true
         run: python scripts/sealevel_pipeline.py
 
+      - name: Build U.S. grid feed (EIA)
+        continue-on-error: true
+        env:
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+        run: python scripts/eia_grid_pipeline.py
+
       - name: Validate output exists and is valid JSON
         run: |
           python3 -c "
@@ -58,6 +64,7 @@ jobs:
           cp public_data_climate_gold.json     site-repo/public_data_climate_gold.json
           cp public_data_hurricanes_gold.json  site-repo/public_data_hurricanes_gold.json
           cp public_data_sealevel_gold.json  site-repo/public_data_sealevel_gold.json
+          cp public_data_us_grid_gold.json   site-repo/public_data_us_grid_gold.json
           cd site-repo
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
