@@ -97,37 +97,35 @@ def build_running(activities, now):
 
 
 # ── GITHUB ────────────────────────────────────────────────────────────────────
-def build_coding(events, now):
-    """events: GitHub public events list. -> coding block (last 7 days, PushEvents)."""
-    cutoff = now - timedelta(days=7)
-    repo_commits = {}
-    total = 0
-    for ev in events:
-        if ev.get("type") != "PushEvent":
-            continue
-        try:
-            when = datetime.fromisoformat(ev["created_at"].replace("Z", "+00:00"))
-        except (KeyError, ValueError):
-            continue
-        if when < cutoff:
-            continue
-        repo = (ev.get("repo") or {}).get("name", "").split("/")[-1]
-        payload = ev.get("payload") or {}
-        # GitHub's public events feed often returns an abbreviated/empty `commits`
-        # array — `size` is the authoritative commit count for the push.
-        n = payload.get("size")
-        if n is None:
-            n = payload.get("distinct_size")
-        if n is None:
-            n = len(payload.get("commits") or [])
-        repo_commits[repo] = repo_commits.get(repo, 0) + n
-        total += n
-    active = sorted(({"name": r, "commits": c} for r, c in repo_commits.items()),
-                    key=lambda x: x["commits"], reverse=True)[:5]
-    focus = ", ".join(r["name"] for r in active[:3]) or "no public pushes this week"
-    summary = (f"{total} commit(s) this week across {len(repo_commits)} repo(s); "
-               f"most active: {focus}." if total else
-               "No public GitHub pushes in the last 7 days.")
+def build_coding(now, fetch=_get, headers=None):
+    """Reliable coding activity: list repos by push time, then count Yash-authored
+    commits per repo from the commits API. The public events feed is cached and
+    abbreviates commit data, so we query repo state directly instead."""
+    cutoff_iso = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    active = []
+    repos = fetch(f"https://api.github.com/users/{GH_USER}/repos?sort=pushed&per_page=30&type=owner",
+                  headers=headers)
+    if isinstance(repos, list):
+        for r in repos:
+            if (r.get("pushed_at") or "") < cutoff_iso:
+                break  # repos are sorted by pushed-desc — everything after is older
+            name = r.get("name", "")
+            commits = fetch(
+                f"https://api.github.com/repos/{GH_USER}/{name}/commits"
+                f"?since={cutoff_iso}&author={GH_USER}&per_page=100", headers=headers)
+            n = len(commits) if isinstance(commits, list) else 0
+            if n > 0:
+                active.append({"name": name, "commits": n, "language": r.get("language")})
+    active.sort(key=lambda x: x["commits"], reverse=True)
+    active = active[:5]
+    total = sum(a["commits"] for a in active)
+    focus = ", ".join(a["name"] for a in active[:3]) or "no commits this week"
+    if total:
+        langs = sorted({a["language"] for a in active if a.get("language")})
+        lang_str = f" ({', '.join(langs)})" if langs else ""
+        summary = f"{total} commit(s) this week across {len(active)} repo(s){lang_str}; most active: {focus}."
+    else:
+        summary = "No GitHub commits authored in the last 7 days."
     return {"week_commits": total, "active_repos": active, "current_focus": focus, "summary": summary}
 
 
@@ -156,10 +154,8 @@ def main(strava_fetch=_get, strava_token=None, gh_fetch=_get):
         headers = {"User-Agent": UA, "Accept": "application/vnd.github+json"}
         if os.environ.get("GITHUB_TOKEN"):
             headers["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
-        events = gh_fetch(f"https://api.github.com/users/{GH_USER}/events/public?per_page=100", headers=headers)
-        pushes = sum(1 for e in events if e.get("type") == "PushEvent") if isinstance(events, list) else 0
-        print(f"GitHub: {len(events) if isinstance(events, list) else '??'} public events, {pushes} PushEvent(s)")
-        coding = build_coding(events, now)
+        coding = build_coding(now, fetch=gh_fetch, headers=headers)
+        print(f"GitHub: {coding['week_commits']} commit(s) across {len(coding['active_repos'])} active repo(s)")
     except Exception as e:
         print(f"GitHub step failed ({e}) — keeping placeholder.")
 
