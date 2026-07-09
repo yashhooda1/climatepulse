@@ -1,0 +1,46 @@
+name: Data-center figures — staleness check
+
+# Lives in the climatepulse repo (NOT the deployed site). Reads the live
+# /api/datacenters endpoint to find the data vintage and opens a reminder issue
+# in THIS repo when the curated figures are due for review. Touches no site files.
+
+on:
+  schedule:
+    - cron: '0 6 1 */3 *'    # quarterly, 1st @ 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run staleness check
+        id: check
+        env:
+          STALE_MONTHS: '6'
+          DC_LIVE_URL: 'https://www.yashhooda.ai/api/datacenters'
+        run: python scripts/dc_staleness_check.py
+      - name: Open reminder issue (deduped)
+        if: steps.check.outputs.due == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create data-refresh --color FBCA04 \
+            --description "Curated dashboard data needs review" 2>/dev/null || true
+          existing=$(gh issue list --state open --search "Data-center figures: time to verify" \
+                     --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Open reminder already exists (#$existing) — skipping."
+          else
+            gh issue create \
+              --title "🔄 Data-center figures: time to verify & refresh" \
+              --label data-refresh \
+              --body-file dc_refresh_issue.md
+          fi
