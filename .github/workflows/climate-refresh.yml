@@ -71,5 +71,5 @@ jobs:
           git add public_data_climate_gold.json public_data_hurricanes_gold.json \
                   public_data_sealevel_gold.json public_data_us_grid_gold.json
           git diff --staged --quiet \
-            || git commit -m "chore: refresh ClimatePulse + hurricane gold data [skip ci]"
+            || git commit -m "chore: refresh ClimatePulse gold data (climate, hurricanes, sea level, US grid) [skip ci]"
           git push
