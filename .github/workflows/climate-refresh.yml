@@ -1,4 +1,4 @@
-name: ClimatePulse — weekly data refresh
+name: ClimatePulse — daily data refresh
 
 on:
   schedule:
