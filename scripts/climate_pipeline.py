@@ -1,6 +1,6 @@
 """
 ClimatePulse v2 — Bronze → Silver → Gold pipeline
-9 stations: Houston, Newark, Delhi, London, Dallas, Denver, Helsinki, Chicago, and Los Angeles
+13 stations: Houston, Newark, Delhi, London, Dallas, Denver, Helsinki, Rome, Brussels, Paris, Amsterdam, Chicago, and Los Angeles
 Fetches year by year, handles Celsius→Fahrenheit for international stations.
 Writes public_data_climate_gold.json at repo root.
 """
@@ -62,6 +62,30 @@ STATIONS = {
         "name":     "London, UK",
         "metric":   True,   # NOAA returns tenths-of-Celsius for this station
         "color":    "#c084fc",
+    },
+    "AMS": {
+        "id":       "NLE00152485",     # Schiphol
+        "name":     "Amsterdam, NL",
+        "metric":   True,
+        "color":    "#a3e635",
+    },
+    "CDG": {
+        "id":       "FRM00007149",     # Orly
+        "name":     "Paris, France",
+        "metric":   True,
+        "color":    "#818cf8",
+    },
+    "BRU": {
+        "id":       "BE000006447",     # Uccle (Royal Observatory)
+        "name":     "Brussels, Belgium",
+        "metric":   True,
+        "color":    "#e879f9",
+    },
+    "FCO": {
+        "id":       "IT000016239",     # Roma Ciampino
+        "name":     "Rome, Italy",
+        "metric":   True,
+        "color":    "#fb7185",
     },
     "DEL": {
         "id":       "IN022021900",
@@ -152,6 +176,12 @@ def compute_gold(daily, station_cfg):
     for y in years:
         yd = daily[daily["year"] == y]
         if len(yd) < 30:
+            continue
+        # An annual mean needs a full year. Without this, the in-progress current
+        # year (and any station whose feed stops mid-year, e.g. Rome/Ciampino)
+        # produces a biased average — a fake "cooling" dip at the end of the trend
+        # line that also drags the regression slope down.
+        if yd["month"].nunique() < 12:
             continue
         yearly.append({
             "year":      int(y),
