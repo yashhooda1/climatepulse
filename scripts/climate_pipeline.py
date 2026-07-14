@@ -192,6 +192,26 @@ def compute_gold(daily, station_cfg):
         })
     ydf = pd.DataFrame(yearly)
 
+    MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    ytd = None
+    all_years = sorted(int(y) for y in daily["year"].unique())
+    if all_years:
+        latest = all_years[-1]
+        ld = daily[daily["year"] == latest]
+        # incomplete = missing a month (in-progress year OR a stale feed like Rome)
+        if ld["month"].nunique() < 12 and len(ld) >= 30:
+            through = int(ld["month"].max())
+            ytd = {
+                "year":          latest,
+                "avg_tmean":     round(float(ld["tmean"].mean()), 2),
+                "count_80f":     int((ld["tmax"] >= 80).sum()),
+                "days":          int(len(ld)),
+                "through_month": through,
+                "through_label": MONTH_NAMES[through - 1],
+                "last_date":     ld["date"].max().strftime("%Y-%m-%d"),
+                "partial":       True,
+            }
+
     x = np.array(ydf["year"])
     y = np.array(ydf["avg_tmean"])
     m, _ = np.polyfit(x - x.mean(), y, 1)
@@ -233,6 +253,7 @@ def compute_gold(daily, station_cfg):
         "slope_winter":     slope_winter,
         "slope_80f_febmar": slope_80f,
         "yearly":           ydf.to_dict(orient="records"),
+        "ytd":              ytd,
         "monthly":          monthly,
         "winter":           wyr.to_dict(orient="records"),
     }
