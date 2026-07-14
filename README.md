@@ -1,6 +1,6 @@
 ClimatePulse 🌎
 
-An end-to-end climate analytics pipeline comparing long-term temperature trends between Houston (IAH) and Newark (EWR) using NOAA GHCN Daily data (1970–Present).
+An end-to-end climate analytics pipeline comparing long-term temperature trends between 9 stations: Houston, Newark, Delhi, London, Dallas, Denver, Helsinki, Chicago, and Los Angeles using NOAA GHCN Daily data (1970–Present).
 
 ## 📊 Executive Summary
 
