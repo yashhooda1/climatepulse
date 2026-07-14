@@ -39,6 +39,24 @@ STATIONS = {
         "metric":   False,
         "color":    "#4ade80",
     },
+    "LAX": {
+        "id":       "USW00023174",
+        "name":     "Los Angeles, CA",
+        "metric":   False,
+        "color":    "#f472b6",
+    },
+    "HEL": {
+        "id":       "FI000000304",
+        "name":     "Helsinki, Finland",
+        "metric":   True,
+        "color":    "#22d3ee",
+    },
+    "ORD": {
+        "id":       "USW00094846",
+        "name":     "Chicago, IL",
+        "metric":   False,
+        "color":    "#2dd4bf",
+    },
     "LHR": {
         "id":       "UKM00003772",
         "name":     "London, UK",
