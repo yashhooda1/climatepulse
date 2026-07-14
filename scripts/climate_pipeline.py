@@ -1,6 +1,6 @@
 """
 ClimatePulse v2 — Bronze → Silver → Gold pipeline
-6 stations: Houston, Newark, Delhi, London, Dallas, Denver
+9 stations: Houston, Newark, Delhi, London, Dallas, Denver, Helsinki, Chicago, and Los Angeles
 Fetches year by year, handles Celsius→Fahrenheit for international stations.
 Writes public_data_climate_gold.json at repo root.
 """
