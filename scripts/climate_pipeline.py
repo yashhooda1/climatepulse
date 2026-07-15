@@ -97,6 +97,52 @@ STATIONS = {
 
 def c_to_f(c): return round(c * 9/5 + 32, 2)
 
+
+def compute_heat_ytd(daily, latest_year):
+    """Heat-days year-to-date for latest_year, paced by day-of-year vs prior years.
+    Returns None if the latest year is effectively complete or too sparse."""
+    import numpy as np
+    d = daily.copy()
+    d["date"] = pd.to_datetime(d["date"])
+    d["doy"]  = d["date"].dt.dayofyear
+ 
+    ld = d[d["year"] == latest_year]
+    if ld.empty:
+        return None
+    cutoff_doy = int(ld["doy"].max())
+    # if the latest year is basically complete, there's no "pace" to show
+    if cutoff_doy >= 365:
+        return None
+ 
+    so_far = int((ld["tmax"] >= 80).sum())
+ 
+    prior       = d[(d["year"] < latest_year) & (d["doy"] <= cutoff_doy)]
+    same_window = prior[prior["tmax"] >= 80].groupby("year").size()
+    full        = (d[d["year"] < latest_year]
+                   .assign(hot=lambda x: x["tmax"] >= 80)
+                   .groupby("year")["hot"].sum())
+ 
+    last_year = latest_year - 1
+    vs_last = (so_far - int(same_window.loc[last_year])
+               if last_year in same_window.index else None)
+ 
+    ratios = [full.loc[y] / same_window.loc[y]
+              for y in same_window.index
+              if same_window.loc[y] >= 5 and y in full.index]
+    projected = round(so_far * float(np.mean(ratios))) if ratios else None
+ 
+    return {
+        "year":                   latest_year,
+        "count_so_far":           so_far,
+        "through_doy":            cutoff_doy,
+        "last_date":              ld["date"].max().strftime("%Y-%m-%d"),
+        "vs_last_year_same_date": vs_last,
+        "last_year_same_date":    (int(same_window.loc[last_year])
+                                   if last_year in same_window.index else None),
+        "projected_full_year":    projected,
+        "partial":                True,
+    }
+
 # ── Bronze: fetch one year at a time ────────────────────────────────────────
 def fetch_year(station_id, year, metric=False):
     url     = "https://www.ncei.noaa.gov/cdo-web/api/v2/data"
@@ -195,6 +241,7 @@ def compute_gold(daily, station_cfg):
     MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
     ytd = None
     all_years = sorted(int(y) for y in daily["year"].unique())
+    heat_ytd = compute_heat_ytd(daily, all_years[-1]) if all_years else None
     if all_years:
         latest = all_years[-1]
         ld = daily[daily["year"] == latest]
@@ -254,6 +301,7 @@ def compute_gold(daily, station_cfg):
         "slope_80f_febmar": slope_80f,
         "yearly":           ydf.to_dict(orient="records"),
         "ytd":              ytd,
+        "heat_ytd":         heat_ytd, 
         "monthly":          monthly,
         "winter":           wyr.to_dict(orient="records"),
     }
