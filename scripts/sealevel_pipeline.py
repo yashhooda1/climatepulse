@@ -12,7 +12,7 @@ Source: NOAA/NESDIS/STAR Laboratory for Satellite Altimetry
   "Altimetry data are provided by the NOAA Laboratory for Satellite Altimetry."
 """
 
-import json, math, statistics, urllib.request
+import json, math, statistics, time, urllib.request
 from pathlib import Path
 from datetime import datetime
 
@@ -142,10 +142,24 @@ CURATED = {
 }
 
 
-def _get(url, timeout=60):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode("utf-8", errors="replace")
+def _get(url, timeout=180, retries=4, backoff=10):
+    """Fetch with retries — NOAA STAR intermittently stalls mid-download."""
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read().decode("utf-8", errors="replace")
+        except Exception as e:
+            last_err = e
+            if attempt < retries:
+                wait = backoff * attempt
+                print(f"  fetch attempt {attempt}/{retries} failed "
+                      f"({type(e).__name__}: {e}) — retrying in {wait}s")
+                time.sleep(wait)
+            else:
+                print(f"  fetch failed after {retries} attempts: {type(e).__name__}: {e}")
+    raise last_err
 
 
 # ── Parse NOAA STAR altimetry CSV → annual GMSL (mm above 1993) ───────────────
