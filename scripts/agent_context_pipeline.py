@@ -102,12 +102,12 @@ def build_running(activities, now):
         })
     long_run = max((r["miles"] for r in recent), default=0)
     long_pace = next((r["pace"] for r in recent if r["miles"] == long_run), None)
-    days_to = max(0, (BOULDERTHON - now).days)
+    days_to = max(0, (HOUSTON_MARATHON - now).days)
     summary = (f"{week_miles} mi over the last 7 days across {len(runs)} run(s)"
                + (f"; longest {long_run} mi" + (f" @ {long_pace}/mi" if long_pace else "") if long_run else "")
-               + f". {days_to} days to the Boulderthon marathon (Sep 27, 2026).")
+               + f". {days_to} days to the Chevron Houston marathon (Jan 17, 2027).")
     return {"week_miles": week_miles, "week_runs": len(runs), "recent": recent,
-            "longest_run_miles": long_run, "days_to_boulderthon": days_to,
+            "longest_run_miles": long_run, "days_to_chevron": days_to,
             "days_to_houston": max(0, (HOUSTON_MARATHON - now).days), "summary": summary}
 
 
