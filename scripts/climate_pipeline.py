@@ -347,13 +347,32 @@ def main():
             print(f"Empty yearly for {code} — aborting.")
             return
 
-    result["generated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-    result["station_codes"] = list(STATIONS.keys())
-    OUT_PATH.write_text(json.dumps(result, separators=(',', ':')))
-    print(f"\n✅ Written to {OUT_PATH}")
+    from datetime import timezone, timedelta
+    MAX_LAG_DAYS = 75   # generous; covers normal EU exchange latency
+    today = datetime.now(timezone.utc).date()
+    stale = []
     for code in STATIONS:
-        last = result[code]['yearly'][-1]['year']
-        print(f"   {code}: {result[code]['slope_annual']}°F/decade, latest year: {last}")
+        blk = result[code]
+        last = (blk.get("ytd") or blk.get("heat_ytd") or {}).get("last_date")
+        if not last:
+            last = f"{blk['yearly'][-1]['year']}-12-31"
+        lag = (today - datetime.strptime(last, "%Y-%m-%d").date()).days
+        blk["last_data_date"] = last
+        blk["lag_days"] = lag
+        if lag > MAX_LAG_DAYS:
+            stale.append(f"{code} ({last}, {lag}d)")
+    result["data_through"] = min(result[c]["last_data_date"] for c in STATIONS)
+    if stale:
+        print("STALE STATIONS: " + ", ".join(stale))
+           sys.exit(1)
+
+        result["generated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        result["station_codes"] = list(STATIONS.keys())
+        OUT_PATH.write_text(json.dumps(result, separators=(',', ':')))
+        print(f"\n✅ Written to {OUT_PATH}")
+        for code in STATIONS:
+            last = result[code]['yearly'][-1]['year']
+            print(f"   {code}: {result[code]['slope_annual']}°F/decade, latest year: {last}")
 
 if __name__ == "__main__":
     main()
