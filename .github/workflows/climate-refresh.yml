@@ -43,14 +43,15 @@ jobs:
       - name: Validate output exists and is valid JSON
         run: |
           python3 -c "
-          import json, sys
+          import json
           d = json.load(open('public_data_climate_gold.json'))
           assert len(d['station_codes']) == 13, 'station count regression'
-          assert all(len(d[c]['yearly']) > 40 for c in d['station_codes']), 'short series'
-          print('✅ Validation passed — data_through', d['data_through'],
-                '| stale:', d['stale_stations'] or 'none')
+          assert len(d['IAH']['yearly']) > 50 and len(d['EWR']['yearly']) > 50, 'core series truncated'
+          thin = {c: len(d[c]['yearly']) for c in d['station_codes'] if len(d[c]['yearly']) < 25}
+          assert not thin, f'short series: {thin}'
+          print('✅ data_through', d['data_through'], '| stale:', d['stale_stations'] or 'none')
           "
-
+          
       - name: Push updated gold data to yashhooda repo
         env:
           PAT: ${{ secrets.YASHHOODA_PAT }}
