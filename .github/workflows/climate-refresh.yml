@@ -44,15 +44,11 @@ jobs:
         run: |
           python3 -c "
           import json, sys
-          try:
-              data = json.load(open('public_data_climate_gold.json'))
-              assert 'IAH' in data and 'EWR' in data
-              assert len(data['IAH']['yearly']) > 50
-              assert len(data['EWR']['yearly']) > 50
-              print('✅ Validation passed')
-          except Exception as e:
-              print(f'❌ Validation failed: {e}')
-              sys.exit(1)
+          d = json.load(open('public_data_climate_gold.json'))
+          assert len(d['station_codes']) == 13, 'station count regression'
+          assert all(len(d[c]['yearly']) > 40 for c in d['station_codes']), 'short series'
+          print('✅ Validation passed — data_through', d['data_through'],
+                '| stale:', d['stale_stations'] or 'none')
           "
 
       - name: Push updated gold data to yashhooda repo
@@ -63,12 +59,10 @@ jobs:
           FILES="public_data_climate_gold.json public_data_hurricanes_gold.json public_data_sealevel_gold.json public_data_us_grid_gold.json"
           COPIED=""
           for f in $FILES; do
-            if [ -s "$f" ]; then
-              cp "$f" "site-repo/$f"
-              COPIED="$COPIED $f"
-              echo "staged: $f"
+            if [ -s "$f" ] && [ "$f" -nt .git/HEAD ]; then
+              cp "$f" "site-repo/$f"; COPIED="$COPIED $f"; echo "staged: $f"
             else
-              echo "SKIP (not produced this run): $f"
+              echo "SKIP (not regenerated this run): $f"
             fi
           done
           if [ -z "$COPIED" ]; then
