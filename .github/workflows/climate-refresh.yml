@@ -2,8 +2,17 @@ name: ClimatePulse — daily data refresh
 
 on:
   schedule:
-    - cron: '0 4 * * *'   # Every day 04:00 UTC
-  workflow_dispatch:      # Manual trigger
+    - cron: '0 4 * * *'
+    - cron: '0 3 1 * *'      # 1st of month — full rebuild
+  workflow_dispatch:
+    inputs:
+      full_refresh:
+        description: 'Ignore cache and refetch 1970–present'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
 
 jobs:
   refresh:
@@ -13,17 +22,21 @@ jobs:
       - name: Checkout climatepulse repo
         uses: actions/checkout@v4
 
+      - name: Mark run start
+        run: touch /tmp/run-start
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pandas scikit-learn numpy requests
+        run: pip install pandas numpy requests pyarrow
 
       - name: Run pipeline
         env:
-          NOAA_TOKEN: ${{ secrets.NOAA_TOKEN }}
+          NOAA_TOKEN:   ${{ secrets.NOAA_TOKEN }}
+          FULL_REFRESH: ${{ github.event.schedule == '0 3 1 * *' || inputs.full_refresh }}
         run: python scripts/climate_pipeline.py
 
       - name: Build hurricane analytics
@@ -51,7 +64,20 @@ jobs:
           assert not thin, f'short series: {thin}'
           print('✅ data_through', d['data_through'], '| stale:', d['stale_stations'] or 'none')
           "
-          
+
+      - name: Commit cache + gold back to climatepulse
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A cache public_data_climate_gold.json
+          if git diff --staged --quiet; then
+            echo "nothing to commit"
+          else
+            git commit -m "chore: refresh climate cache [skip ci]"
+            git pull --rebase --autostash
+            git push
+          fi
+
       - name: Push updated gold data to yashhooda repo
         env:
           PAT: ${{ secrets.YASHHOODA_PAT }}
@@ -60,7 +86,7 @@ jobs:
           FILES="public_data_climate_gold.json public_data_hurricanes_gold.json public_data_sealevel_gold.json public_data_us_grid_gold.json"
           COPIED=""
           for f in $FILES; do
-            if [ -s "$f" ] && [ "$f" -nt .git/HEAD ]; then
+            if [ -s "$f" ] && [ "$f" -nt /tmp/run-start ]; then
               cp "$f" "site-repo/$f"; COPIED="$COPIED $f"; echo "staged: $f"
             else
               echo "SKIP (not regenerated this run): $f"
