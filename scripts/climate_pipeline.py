@@ -5,14 +5,16 @@ Fetches year by year, handles Celsius→Fahrenheit for international stations.
 Writes public_data_climate_gold.json at repo root.
 """
 
-import os, json, time, requests, numpy as np, pandas as pd
+import os, sys, json, time, requests, numpy as np, pandas as pd
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 NOAA_TOKEN = os.environ.get("NOAA_TOKEN", "")
 START_YEAR = 1970
 END_YEAR   = datetime.utcnow().year
 OUT_PATH   = Path(__file__).parent.parent / "public_data_climate_gold.json"
+MAX_LAG_DAYS = 75              # generous; covers normal EU exchange latency
+KNOWN_STALE  = {"LHR", "FCO", "DEL"}   # dead upstream since Aug 2025 — shrink as fixed
 
 STATIONS = {
     "IAH": {
@@ -306,7 +308,6 @@ def compute_gold(daily, station_cfg):
         "winter":           wyr.to_dict(orient="records"),
     }
 
-# ── Main ─────────────────────────────────────────────────────────────────────
 def main():
     existing = None
     if OUT_PATH.exists():
@@ -335,44 +336,45 @@ def main():
         print(f"  {code}: {len(daily)} rows, {years[0]}–{years[-1]}")
 
     if not result:
-        print("Nothing computed — aborting.")
-        return
+        sys.exit("Nothing computed — aborting.")
 
-    # Validate all stations present
     for code in STATIONS:
         if code not in result:
-            print(f"Missing {code} — aborting.")
-            return
+            sys.exit(f"Missing {code} — aborting.")
         if not result[code].get("yearly"):
-            print(f"Empty yearly for {code} — aborting.")
-            return
+            sys.exit(f"Empty yearly for {code} — aborting.")
 
-    from datetime import timezone, timedelta
-    MAX_LAG_DAYS = 75   # generous; covers normal EU exchange latency
-    today = datetime.now(timezone.utc).date()
-    stale = []
+    # ── Freshness audit ──────────────────────────────────────────────────────
+    today, unexpected = datetime.now(timezone.utc).date(), []
+    for code in STATIONS:
+        blk  = result[code]
+        last = ((blk.get("ytd") or blk.get("heat_ytd") or {}).get("last_date")
+                or f"{blk['yearly'][-1]['year']}-12-31")
+        lag  = (today - datetime.strptime(last, "%Y-%m-%d").date()).days
+        blk["last_data_date"] = last
+        blk["lag_days"]       = lag
+        blk["stale"]          = lag > MAX_LAG_DAYS
+        if blk["stale"] and code not in KNOWN_STALE:
+            unexpected.append(f"{code} ({last}, {lag}d)")
+
+    fresh = [c for c in STATIONS if not result[c]["stale"]]
+    result["data_through"]   = min(result[c]["last_data_date"] for c in fresh) if fresh else None
+    result["stale_stations"] = [c for c in STATIONS if result[c]["stale"]]
+    result["generated_at"]   = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    result["station_codes"]  = list(STATIONS.keys())
+
+    # Write BEFORE any staleness exit — the 10 healthy cities should still update.
+    OUT_PATH.write_text(json.dumps(result, separators=(',', ':')))
+    print(f"\n✅ Written to {OUT_PATH} (data_through={result['data_through']})")
     for code in STATIONS:
         blk = result[code]
-        last = (blk.get("ytd") or blk.get("heat_ytd") or {}).get("last_date")
-        if not last:
-            last = f"{blk['yearly'][-1]['year']}-12-31"
-        lag = (today - datetime.strptime(last, "%Y-%m-%d").date()).days
-        blk["last_data_date"] = last
-        blk["lag_days"] = lag
-        if lag > MAX_LAG_DAYS:
-            stale.append(f"{code} ({last}, {lag}d)")
-    result["data_through"] = min(result[c]["last_data_date"] for c in STATIONS)
-    if stale:
-        print("STALE STATIONS: " + ", ".join(stale))
-           sys.exit(1)
+        print(f"   {code}: {blk['slope_annual']}°F/decade, through "
+              f"{blk['last_data_date']} ({blk['lag_days']}d)"
+              f"{'  ⚠ STALE' if blk['stale'] else ''}")
 
-        result["generated_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-        result["station_codes"] = list(STATIONS.keys())
-        OUT_PATH.write_text(json.dumps(result, separators=(',', ':')))
-        print(f"\n✅ Written to {OUT_PATH}")
-        for code in STATIONS:
-            last = result[code]['yearly'][-1]['year']
-            print(f"   {code}: {result[code]['slope_annual']}°F/decade, latest year: {last}")
+    if unexpected:
+        sys.exit("NEW STALE STATIONS: " + ", ".join(unexpected))
+
 
 if __name__ == "__main__":
     main()
