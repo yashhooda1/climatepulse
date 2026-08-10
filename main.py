@@ -27,7 +27,7 @@ from sklearn.linear_model import LinearRegression
 import numpy as np
 
 def compute_trend(df, value_col):
-    df = df[df['year'] <= 2026]  # exclude partial 2026
+    df = df[df['year'] <= 2026]  # include partial 2026
     
     yearly = df.groupby('year')[value_col].mean().reset_index()
     
