@@ -26,6 +26,7 @@ FULL_REFRESH   = os.environ.get("FULL_REFRESH", "").lower() == "true"
 STABLE_THROUGH = END_YEAR - 2          # cached; anything after is refetched every run
 MAX_LAG_DAYS   = 75                    # generous; covers normal EU exchange latency
 KNOWN_STALE    = {"LHR", "FCO", "DEL"} # dead upstream since Aug 2025 — shrink as fixed
+MIN_DAYS_PER_MONTH = 12   # a monthly mean needs ~40% of the month to be stable
 
 STATIONS = {
     "IAH": {
@@ -264,29 +265,47 @@ def compute_heat_ytd(daily, latest_year):
         "partial":                True,
     }
 
+def monthly_stats(yd):
+    """Per-month aggregates for one calendar year."""
+    return yd.groupby("month").agg(
+        days      = ("tmean", "size"),
+        avg_tmean = ("tmean", "mean"),
+        avg_tmax  = ("tmax",  "mean"),
+        avg_tmin  = ("tmin",  "mean"),
+        hot_days  = ("tmax",  lambda s: int((s >= 80).sum())),
+    )
+
+
+def year_is_usable(ms):
+    return len(ms) == 12 and bool((ms["days"] >= MIN_DAYS_PER_MONTH).all())
+
 
 # ── Gold: compute stats ──────────────────────────────────────────────────────
 def compute_gold(daily, station_cfg):
     years = sorted(daily["year"].unique())
 
-    yearly = []
+    yearly, rejected = [], []
     for y in years:
         yd = daily[daily["year"] == y]
-        if len(yd) < 30:
+        ms = monthly_stats(yd)
+        if not year_is_usable(ms):
+            rejected.append(int(y))
             continue
-        # An annual mean needs a full year. Without this, the in-progress current
-        # year (and any station whose feed stops mid-year, e.g. Rome/Ciampino)
-        # produces a biased average — a fake "cooling" dip at the end of the trend
-        # line that also drags the regression slope down.
-        if yd["month"].nunique() < 12:
-            continue
+        days = int(ms["days"].sum())
         yearly.append({
             "year":      int(y),
-            "avg_tmean": round(float(yd["tmean"].mean()), 2),
-            "avg_tmax":  round(float(yd["tmax"].mean()),  2),
-            "avg_tmin":  round(float(yd["tmin"].mean()),  2),
-            "count_80f": int((yd["tmax"] >= 80).sum()),
+            # Equal weight per month, NOT per day. A year that under-samples
+            # winter no longer reads as warmer than one that doesn't — this is
+            # the fix for the inflated BRU/FCO slopes.
+            "avg_tmean": round(float(ms["avg_tmean"].mean()), 2),
+            "avg_tmax":  round(float(ms["avg_tmax"].mean()),  2),
+            "avg_tmin":  round(float(ms["avg_tmin"].mean()),  2),
+            "count_80f": int(ms["hot_days"].sum()),
+            "days":      days,
+            "coverage":  round(days / 365.25, 3),
         })
+    if rejected:
+        print(f"  dropped {len(rejected)} low-coverage yrs: {rejected}")
 
     ydf = pd.DataFrame(yearly)
     if ydf.empty:
@@ -316,21 +335,44 @@ def compute_gold(daily, station_cfg):
                 "partial":       True,
             }
 
-    x = np.array(ydf["year"])
-    y = np.array(ydf["avg_tmean"])
-    m, _ = np.polyfit(x - x.mean(), y, 1)
-    ydf["trend"]  = np.round(m * (x - x.mean()) + y.mean(), 2)
-    slope_annual  = round(float(m) * 10, 3)
+    x  = np.array(ydf["year"], dtype=float)
+    y  = np.array(ydf["avg_tmean"], dtype=float)
+    xc = x - x.mean()
 
-    winter = daily[daily["month"].isin([12, 1, 2])]
-    wyr    = winter.groupby("year")["tmin"].mean().reset_index()
-    wyr.columns  = ["year", "avg_tmin"]
-    wx, wy       = np.array(wyr["year"]), np.array(wyr["avg_tmin"])
-    wm, _        = np.polyfit(wx - wx.mean(), wy, 1)
-    wyr["trend"] = np.round(wm * (wx - wx.mean()) + wy.mean(), 2)
-    slope_winter = round(float(wm) * 10, 3)
+    if len(x) >= 4:
+        coef, cov = np.polyfit(xc, y, 1, cov=True)
+        m, se = float(coef[0]), float(np.sqrt(cov[0, 0]))
+    else:
+        m, se = float(np.polyfit(xc, y, 1)[0]), float("nan")
 
-    febmar = daily[daily["month"].isin([2, 3])]
+    ydf["trend"]      = np.round(m * xc + y.mean(), 2)
+    slope_annual      = round(m * 10, 3)
+    slope_annual_se   = None if np.isnan(se) else round(se * 10, 3)
+    slope_annual_ci95 = (None if np.isnan(se)
+                         else [round((m - 1.96 * se) * 10, 3),
+                               round((m + 1.96 * se) * 10, 3)])
+
+    w = daily[daily["month"].isin([12, 1, 2])].copy()
+    # Dec belongs to the FOLLOWING year's DJF season
+    w["winter_year"] = w["year"] + (w["month"] == 12).astype(int)
+    wg = (w.groupby("winter_year")
+            .agg(months=("month", "nunique"),
+                 days=("tmin", "size"),
+                 avg_tmin=("tmin", "mean")))
+    wg = wg[(wg["months"] == 3) & (wg["days"] >= 3 * MIN_DAYS_PER_MONTH)]
+
+    if len(wg) > 1:
+        wyr = (wg.reset_index()
+                 .rename(columns={"winter_year": "year"})[["year", "avg_tmin"]])
+        wx, wy       = np.array(wyr["year"], dtype=float), np.array(wyr["avg_tmin"])
+        wm, _        = np.polyfit(wx - wx.mean(), wy, 1)
+        wyr["trend"] = np.round(wm * (wx - wx.mean()) + wy.mean(), 2)
+        slope_winter = round(float(wm) * 10, 3)
+    else:
+        wyr, slope_winter = pd.DataFrame(columns=["year", "avg_tmin", "trend"]), 0.0
+
+    good_years = set(ydf["year"])
+    febmar = daily[daily["month"].isin([2, 3]) & daily["year"].isin(good_years)]
     fm_yr  = (febmar.assign(hot=febmar["tmax"] >= 80)
                     .groupby("year")["hot"].sum().reset_index())
     fm_yr.columns = ["year", "count_80f"]
@@ -355,6 +397,10 @@ def compute_gold(daily, station_cfg):
         "name":             station_cfg["name"],
         "color":            station_cfg["color"],
         "slope_annual":     slope_annual,
+        "slope_annual_se":   slope_annual_se,
+        "slope_annual_ci95": slope_annual_ci95,
+        "n_years":           int(len(ydf)),
+        "rejected_years":    rejected,
         "slope_winter":     slope_winter,
         "slope_80f_febmar": slope_80f,
         "yearly":           ydf.to_dict(orient="records"),
@@ -416,7 +462,15 @@ def main():
                       .sort_values("date")
                       .reset_index(drop=True))
 
-        result[code] = compute_gold(daily, cfg)
+        try:
+            result[code] = compute_gold(daily, cfg)
+        except ValueError as e:
+            print(f"  {e}")
+            if existing and code in existing:
+                print(f"  Keeping existing gold block for {code}")
+                result[code] = existing[code]
+            save_cache(code, daily)
+            continue
         save_cache(code, daily)
         yrs = sorted(daily["year"].unique())
         print(f"  {code}: {len(daily)} rows, {yrs[0]}–{yrs[-1]}")
@@ -461,7 +515,13 @@ def main():
               f"{'  ⚠ STALE' if blk['stale'] else ''}")
 
     if unexpected:
-        sys.exit("NEW STALE STATIONS: " + ", ".join(unexpected))
+        msg = "NEW STALE STATIONS: " + ", ".join(unexpected)
+        print(f"::warning title=New stale stations::{msg}")
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with open(summary, "a") as fh:
+                fh.write(f"### ⚠ {msg}\n")
+        result["unexpected_stale"] = [u.split()[0] for u in unexpected]
 
 
 if __name__ == "__main__":
