@@ -22,6 +22,16 @@ jobs:
       - name: Checkout climatepulse repo
         uses: actions/checkout@v4
 
+      - name: Inspect cache state
+        run: |
+          echo "--- tracked cache files at checkout ---"
+          git ls-files cache | head -20
+          echo "count: $(git ls-files cache | wc -l)"
+          echo "--- gitignore check ---"
+          git check-ignore -v cache/ || echo "cache/ not ignored"
+          echo "--- on-disk ---"
+          ls -la cache/ 2>/dev/null || echo "cache/ does not exist"
+
       - name: Mark run start
         run: touch /tmp/run-start
 
@@ -36,22 +46,63 @@ jobs:
       - name: Run pipeline
         env:
           NOAA_TOKEN:   ${{ secrets.NOAA_TOKEN }}
-          FULL_REFRESH: ${{ github.event.schedule == '0 3 1 * *' || inputs.full_refresh }}
+          FULL_REFRESH: ${{ (github.event.schedule == '0 3 1 * *' || inputs.full_refresh == true) && '1' || '0' }}
         run: python scripts/climate_pipeline.py
 
       - name: Build hurricane analytics
+        id: hurricane
         continue-on-error: true
-        run: python scripts/hurricane_pipeline.py
+        run: |
+          for i in 1 2 3; do
+            python scripts/hurricane_pipeline.py && exit 0
+            echo "attempt $i failed; sleeping $((i*15))s"
+            sleep $((i*15))
+          done
+          exit 1
 
       - name: Build sea level analytics
+        id: sealevel
         continue-on-error: true
-        run: python scripts/sealevel_pipeline.py
+        run: |
+          for i in 1 2 3; do
+            python scripts/sealevel_pipeline.py && exit 0
+            echo "attempt $i failed; sleeping $((i*15))s"
+            sleep $((i*15))
+          done
+          exit 1
 
       - name: Build U.S. grid feed (EIA)
+        id: eia
         continue-on-error: true
         env:
           EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
-        run: python scripts/eia_grid_pipeline.py
+        run: |
+          for i in 1 2 3; do
+            python scripts/eia_grid_pipeline.py && exit 0
+            echo "attempt $i failed; sleeping $((i*15))s"
+            sleep $((i*15))
+          done
+          exit 1
+
+      - name: Gate on analytics outcomes
+        run: |
+          FAILED=""
+          if [ "${{ steps.hurricane.outcome }}" = "failure" ]; then FAILED="$FAILED hurricane"; fi
+          if [ "${{ steps.sealevel.outcome }}"  = "failure" ]; then FAILED="$FAILED sealevel"; fi
+          if [ "${{ steps.eia.outcome }}"       = "failure" ]; then FAILED="$FAILED eia"; fi
+
+          if [ -n "$FAILED" ]; then
+            echo "::warning title=Stale feeds::not regenerated:$FAILED"
+            echo "### ⚠ Stale feeds:$FAILED" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "all analytics feeds regenerated"
+          fi
+
+          # hard-fail only when every downstream feed died
+          if [ "$FAILED" = " hurricane sealevel eia" ]; then
+            echo "::error::all analytics feeds failed"
+            exit 1
+          fi
 
       - name: Validate output exists and is valid JSON
         run: |
@@ -67,9 +118,11 @@ jobs:
 
       - name: Commit cache + gold back to climatepulse
         run: |
+          mkdir -p cache
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A cache public_data_climate_gold.json
+          echo "--- staged ---"; git diff --staged --stat
           if git diff --staged --quiet; then
             echo "nothing to commit"
           else
