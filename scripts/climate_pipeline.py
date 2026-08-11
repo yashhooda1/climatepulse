@@ -384,8 +384,9 @@ def main():
         cached = load_cache(code)
 
         if cached is not None:
-            years = list(range(STABLE_THROUGH + 1, END_YEAR + 1))
-            print(f"  cache: {len(cached)} rows ≤{STABLE_THROUGH} — fetching {years}")
+            cached_max = int(cached["year"].max())
+            years = list(range(cached_max + 1, END_YEAR + 1))
+            print(f"  cache: {len(cached)} rows through {cached_max} — fetching {years}")
         else:
             years = list(range(START_YEAR, END_YEAR + 1))
             print(f"  cache miss — full fetch {START_YEAR}–{END_YEAR}")
