@@ -113,13 +113,19 @@ DAILY_COLS = ["date", "year", "month", "tmax", "tmin", "tmean"]
 
 
 # ── Cache ────────────────────────────────────────────────────────────────────
-def load_cache(code):
-    """Return cached daily rows for years <= STABLE_THROUGH, or None."""
+def load_cache(code, station_id):
+    """Return cached daily rows for years <= STABLE_THROUGH, or None.
+    Invalidates the cache if it was built from a different station ID."""
     p = CACHE_DIR / f"{code}.parquet"
     if FULL_REFRESH or not p.exists():
         return None
     try:
         df = pd.read_parquet(p)
+        cached_id = df["station_id"].iloc[0] if "station_id" in df.columns else None
+        if cached_id != station_id:
+            print(f"  cache built from {cached_id!r}, config says {station_id!r} "
+                  f"— discarding and refetching")
+            return None
         df["date"] = pd.to_datetime(df["date"])
         df = df[df["year"] <= STABLE_THROUGH]
         return df if not df.empty else None
@@ -128,13 +134,15 @@ def load_cache(code):
         return None
 
 
-def save_cache(code, daily):
+def save_cache(code, daily, station_id):
     """Persist only the stable (immutable) portion of the series."""
     CACHE_DIR.mkdir(exist_ok=True)
-    stable = daily[daily["year"] <= STABLE_THROUGH].sort_values("date")
+    stable = daily[daily["year"] <= STABLE_THROUGH].sort_values("date").copy()
     if stable.empty:
         return
-    stable[DAILY_COLS].to_parquet(CACHE_DIR / f"{code}.parquet", index=False)
+    stable["station_id"] = station_id
+    stable[DAILY_COLS + ["station_id"]].to_parquet(CACHE_DIR / f"{code}.parquet",
+                                                    index=False)
 
 
 # ── Bronze: fetch one year at a time ─────────────────────────────────────────
@@ -431,9 +439,9 @@ def main():
     result = {}
     for code, cfg in STATIONS.items():
         print(f"\n── {code} — {cfg['name']} ──")
-        cached = load_cache(code)
-
+        cached = load_cache(code, cfg["id"])
         if cached is not None:
+            cached = cached[DAILY_COLS]          # drop station_id before concat
             cached_max = int(cached["year"].max())
             years = list(range(cached_max + 1, END_YEAR + 1))
             print(f"  cache: {len(cached)} rows through {cached_max} — fetching {years}")
@@ -473,9 +481,9 @@ def main():
             if existing and code in existing:
                 print(f"  Keeping existing gold block for {code}")
                 result[code] = existing[code]
-            save_cache(code, daily)
+            save_cache(code, daily, cfg["id"])
             continue
-        save_cache(code, daily)
+        save_cache(code, daily, cfg["id"])
         yrs = sorted(daily["year"].unique())
         print(f"  {code}: {len(daily)} rows, {yrs[0]}–{yrs[-1]}")
 
