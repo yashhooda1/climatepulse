@@ -25,7 +25,7 @@ CACHE_DIR  = ROOT / "cache"
 FULL_REFRESH   = os.environ.get("FULL_REFRESH", "").lower() == "true"
 STABLE_THROUGH = END_YEAR - 2          # cached; anything after is refetched every run
 MAX_LAG_DAYS   = 75                    # generous; covers normal EU exchange latency
-KNOWN_STALE    = {"LHR", "FCO", "DEL"} # dead upstream since Aug 2025 — shrink as fixed
+KNOWN_STALE = {"FCO", "DEL"} # dead upstream since Aug 2025 — shrink as fixed
 MIN_DAYS_PER_MONTH = 12   # a monthly mean needs ~40% of the month to be stable
 
 STATIONS = {
