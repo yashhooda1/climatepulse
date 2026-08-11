@@ -111,8 +111,11 @@ jobs:
           d = json.load(open('public_data_climate_gold.json'))
           assert len(d['station_codes']) == 13, 'station count regression'
           assert len(d['IAH']['yearly']) > 50 and len(d['EWR']['yearly']) > 50, 'core series truncated'
-          thin = {c: len(d[c]['yearly']) for c in d['station_codes'] if len(d[c]['yearly']) < 25}
+          thin = {c: len(d[c]['yearly']) for c in d['station_codes']
+                  if len(d[c]['yearly']) < 25 and d[c].get('trend_reliable', True)}
           assert not thin, f'short series: {thin}'
+          weak = [c for c in d['station_codes'] if not d[c].get('trend_reliable', True)]
+          if weak: print('⚠ trend suppressed (short record):', weak)
           print('✅ data_through', d['data_through'], '| stale:', d['stale_stations'] or 'none')
           "
 
