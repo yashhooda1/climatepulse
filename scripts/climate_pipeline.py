@@ -72,7 +72,7 @@ STATIONS = {
         "color":    "#2dd4bf",
     },
     "LHR": {
-        "id":       "UKM00003772",
+        "id":       "UKE00105900",
         "name":     "London, UK",
         "metric":   True,
         "color":    "#c084fc",
@@ -352,6 +352,9 @@ def compute_gold(daily, station_cfg):
                          else [round((m - 1.96 * se) * 10, 3),
                                round((m + 1.96 * se) * 10, 3)])
 
+    MIN_TREND_YEARS = 25
+    trend_reliable = len(ydf) >= MIN_TREND_YEARS
+
     w = daily[daily["month"].isin([12, 1, 2])].copy()
     # Dec belongs to the FOLLOWING year's DJF season
     w["winter_year"] = w["year"] + (w["month"] == 12).astype(int)
@@ -399,6 +402,7 @@ def compute_gold(daily, station_cfg):
         "slope_annual":     slope_annual,
         "slope_annual_se":   slope_annual_se,
         "slope_annual_ci95": slope_annual_ci95,
+        "trend_reliable": trend_reliable,
         "n_years":           int(len(ydf)),
         "rejected_years":    rejected,
         "slope_winter":     slope_winter,
