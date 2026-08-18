@@ -515,6 +515,8 @@ def main():
     result["stale_stations"] = [c for c in STATIONS if result[c]["stale"]]
     result["generated_at"]   = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     result["station_codes"]  = list(STATIONS.keys())
+    result["stations"]         = build_station_roster(result)
+    result["stations_summary"] = summarize_roster(result["stations"])
 
     # Write BEFORE any staleness exit — the healthy cities should still update.
     OUT_PATH.write_text(json.dumps(result, separators=(",", ":")))
