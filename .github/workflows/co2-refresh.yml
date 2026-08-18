@@ -1,4 +1,132 @@
-# .github/workflows/co2-refresh.yml
+name: ClimatePulse — monthly CO2 refresh
+
 on:
-  schedule: [{ cron: "0 6 1 * *" }]   # 1st of the month, 06:00 UTC
+  schedule:
+    - cron: '0 6 1 * *'      # 1st of month, 06:00 UTC — after the 03:00 full climate rebuild
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Never overlap with itself; a second run would race the same commit.
+concurrency:
+  group: co2-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout climatepulse repo
+        uses: actions/checkout@v4
+
+      - name: Mark run start
+        run: touch /tmp/run-start
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # co2_pipeline.py is stdlib-only — no pip install step needed.
+
+      - name: Confirm climate gold is present for the station join
+        run: |
+          if [ -s public_data_climate_gold.json ]; then
+            python3 -c "
+          import json
+          d = json.load(open('public_data_climate_gold.json'))
+          print('climate gold: data_through', d.get('data_through'),
+                '|', len(d.get('station_codes', [])), 'stations')
+          "
+          else
+            echo "::warning title=No climate gold::station join will be skipped"
+          fi
+
+      - name: Build CO2 → warming analytics
+        id: co2
+        continue-on-error: true
+        run: |
+          for i in 1 2 3; do
+            python scripts/co2_pipeline.py && exit 0
+            echo "attempt $i failed; sleeping $((i*15))s"
+            sleep $((i*15))
+          done
+          exit 1
+
+      - name: Gate on outcome
+        run: |
+          if [ "${{ steps.co2.outcome }}" = "failure" ]; then
+            echo "::error title=CO2 pipeline failed::all 3 attempts failed"
+            exit 1
+          fi
+          echo "CO2 analytics regenerated"
+
+      - name: Validate output
+        run: |
+          python3 -c "
+          import json
+          d = json.load(open('public_data_co2_gold.json'))
+
+          # Hard requirements — emissions drive everything downstream.
+          em = d['emissions']['annual']
+          assert len(em) >= 50, f'emissions series truncated: {len(em)} yrs'
+          assert em[-1]['cumulative'] > 2000, 'cumulative CO2 implausibly low'
+          assert d['effects'], 'no effects computed'
+
+          # Soft: concentration and GISTEMP fail soft by design.
+          for k in ('concentration', 'global_temp'):
+              if not d.get(k):
+                  print(f'⚠ {k} block is null — upstream unreachable this run')
+
+          t = (d.get('global') or {}).get('tcre_observed')
+          if t:
+              lo, hi = d['reference']['tcre_c_per_1000_gtco2']['likely_range']
+              status = 'within' if t.get('within_ar6_likely_range') else 'OUTSIDE'
+              print(f\"TCRE {t['slope']} °C/1000 GtCO2 (r2={t['r2']}, n={t['n']}) — {status} AR6 {lo}–{hi}\")
+              if not t.get('within_ar6_likely_range'):
+                  # An observational fit landing outside an assessed range means
+                  # the pipeline broke, not that the IPCC did. Warn, don't fail —
+                  # the emissions data is still good and worth shipping.
+                  print('::warning title=TCRE outside AR6 range::check GISTEMP baseline or OWID schema')
+          else:
+              print('⚠ no TCRE — GISTEMP unavailable')
+
+          n = len(d.get('stations') or [])
+          print(f'✅ {len(em)} emission-yrs, {n} stations joined, {len(d[\"effects\"])} effects')
+          if n and n < 13:
+              print(f'::warning title=Partial station join::{n}/13 cities')
+          "
+
+      - name: Commit gold back to climatepulse
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public_data_co2_gold.json
+          if git diff --staged --quiet; then
+            echo "nothing to commit"
+          else
+            git commit -m "chore: refresh CO2 gold data [skip ci]"
+            git pull --rebase --autostash
+            git push
+          fi
+
+      - name: Push gold data to yashhooda repo
+        env:
+          PAT: ${{ secrets.YASHHOODA_PAT }}
+        run: |
+          F=public_data_co2_gold.json
+          if [ ! -s "$F" ] || [ ! "$F" -nt /tmp/run-start ]; then
+            echo "not regenerated this run — nothing to push"
+            exit 0
+          fi
+          git clone https://x-access-token:${PAT}@github.com/yashhooda1/yashhooda.git site-repo
+          cp "$F" "site-repo/$F"
+          cd site-repo
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$F"
+          git diff --staged --quiet \
+            || git commit -m "chore: refresh ClimatePulse CO2 gold data [skip ci]"
+          git push
