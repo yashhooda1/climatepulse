@@ -111,6 +111,90 @@ STATIONS = {
 
 DAILY_COLS = ["date", "year", "month", "tmax", "tmin", "tmean"]
 
+GHCN_COUNTRY = {
+    "US": "United States", "UK": "United Kingdom", "NL": "Netherlands",
+    "BE": "Belgium",       "FR": "France",         "IT": "Italy",
+    "FI": "Finland",       "IN": "India",
+}
+ 
+# Curated, human-readable context. Kept short: the UI shows this under the row.
+STATION_NOTES = {
+    "DEN": "GHCN-D record begins 1996 — 29 complete years vs 56 elsewhere.",
+    "BRU": "Uccle: record since 1833, but 19 years rejected — trend fits 38 of 56.",
+    "HEL": "Kaisaniemi, 60°N — the high-latitude amplification case.",
+    "FCO": "Ciampino: last complete year 2011, feed dead since Aug 2025.",
+    "DEL": "0.79 coverage, 12 years rejected; NCEI relay dead since Aug 2025.",
+    "LHR": "Swapped to UKE00105900 after the Heathrow feed thinned out.",
+}
+ 
+CATALOG_URL = ("https://www.ncei.noaa.gov/access/search/data-search/"
+               "daily-summaries?stations={sid}")
+ 
+ 
+def build_station_roster(result):
+    """UI-ready per-station status list. Call AFTER the freshness audit, so
+    last_data_date / lag_days / stale are already populated on each block."""
+    roster = []
+    for code, cfg in STATIONS.items():
+        blk = result.get(code)
+        if not blk or not blk.get("yearly"):
+            continue
+ 
+        yrs = blk["yearly"]
+        cov = [y["coverage"] for y in yrs if y.get("coverage") is not None]
+ 
+        # Three states, not a boolean. "stale" is an alert; "known_stale" is a
+        # documented dead upstream we've already triaged — the UI should not
+        # flag it red every run, but it must not read as healthy either.
+        if blk.get("stale"):
+            status = "known_stale" if code in KNOWN_STALE else "stale"
+        else:
+            status = "active"
+ 
+        sid = blk["station"]
+        roster.append({
+            "code":            code,
+            "ghcn_id":         sid,
+            "name":            blk["name"],
+            "country":         GHCN_COUNTRY.get(sid[:2], sid[:2]),
+            "color":           blk["color"],
+            "status":          status,
+            "active":          status == "active",
+            "last_data_date":  blk["last_data_date"],
+            "lag_days":        blk["lag_days"],
+            "record_start":    yrs[0]["year"],
+            "record_end":      yrs[-1]["year"],
+            "complete_years":  blk["n_years"],
+            "rejected_years":  len(blk.get("rejected_years") or []),
+            "mean_coverage":   round(sum(cov) / len(cov), 3) if cov else None,
+            "slope_annual":    blk["slope_annual"],
+            "trend_reliable":  blk.get("trend_reliable", False),
+            "note":            STATION_NOTES.get(code),
+            "catalog_url":     CATALOG_URL.format(sid=sid),
+        })
+ 
+    # Healthy first, then by how far behind they are — the list doubles as a
+    # triage queue.
+    roster.sort(key=lambda r: (r["status"] != "active", r["lag_days"]))
+    return roster
+ 
+ 
+def summarize_roster(roster):
+    counts = {"active": 0, "stale": 0, "known_stale": 0}
+    for r in roster:
+        counts[r["status"]] += 1
+    return {
+        "total":           len(roster),
+        **counts,
+        "countries":       len({r["country"] for r in roster}),
+        "record_start":    min(r["record_start"] for r in roster),
+        "record_end":      max(r["record_end"] for r in roster),
+        "station_years":   sum(r["complete_years"] for r in roster),
+        "max_lag_days":    max(r["lag_days"] for r in roster),
+        "freshest":        min(roster, key=lambda r: r["lag_days"])["code"],
+        "lag_threshold":   MAX_LAG_DAYS,
+    }
+
 
 # ── Cache ────────────────────────────────────────────────────────────────────
 def load_cache(code, station_id):
