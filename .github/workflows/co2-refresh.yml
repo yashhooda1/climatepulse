@@ -1,0 +1,4 @@
+# .github/workflows/co2-refresh.yml
+on:
+  schedule: [{ cron: "0 6 1 * *" }]   # 1st of the month, 06:00 UTC
+  workflow_dispatch:
