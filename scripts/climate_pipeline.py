@@ -24,7 +24,8 @@ CACHE_DIR  = ROOT / "cache"
 
 FULL_REFRESH   = os.environ.get("FULL_REFRESH", "").lower() == "true"
 STABLE_THROUGH = END_YEAR - 2          # cached; anything after is refetched every run
-MAX_LAG_DAYS   = 75                    # generous; covers normal EU exchange latency
+MAX_LAG_DAYS   = 75                    # international: covers normal EU exchange latency
+MAX_LAG_US     = 14                    # U.S. ASOS sites update within days — anything more is a fault
 KNOWN_STALE = {"FCO", "DEL"} # dead upstream since Aug 2025 — shrink as fixed
 MIN_DAYS_PER_MONTH = 12   # a monthly mean needs ~40% of the month to be stable
 
@@ -634,7 +635,8 @@ def main():
         lag  = (today - datetime.strptime(last, "%Y-%m-%d").date()).days
         blk["last_data_date"] = last
         blk["lag_days"]       = lag
-        blk["stale"]          = lag > MAX_LAG_DAYS
+        threshold             = MAX_LAG_US if STATIONS[code]["id"].startswith("USW") else MAX_LAG_DAYS
+        blk["stale"]          = lag > threshold
         if blk["stale"] and code not in KNOWN_STALE:
             unexpected.append(f"{code} ({last}, {lag}d)")
 
