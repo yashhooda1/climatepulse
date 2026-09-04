@@ -28,6 +28,18 @@ MAX_LAG_DAYS   = 75                    # generous; covers normal EU exchange lat
 KNOWN_STALE = {"FCO", "DEL"} # dead upstream since Aug 2025 — shrink as fixed
 MIN_DAYS_PER_MONTH = 12   # a monthly mean needs ~40% of the month to be stable
 
+# ── NOAA quota guard ─────────────────────────────────────────────────────────
+# CDO allows 1,000 requests/day. A per-second 429 clears in seconds; a daily-cap
+# 429 does not clear at all. We back off 5s → 20s → 60s; if it's still 429 the
+# cap is gone, and we stop fetching for the rest of the run instead of
+# silently caching partial years.
+QUOTA_BACKOFF_S = (5, 20, 60)
+QUOTA_EXHAUSTED = False
+NOAA_CALLS      = 0
+
+class QuotaExhausted(Exception):
+    pass
+
 STATIONS = {
     "IAH": {
         "id":       "USW00012960",
@@ -228,12 +240,13 @@ def save_cache(code, daily, station_id):
     stable[DAILY_COLS + ["station_id"]].to_parquet(CACHE_DIR / f"{code}.parquet",
                                                     index=False)
 
-
-# ── Bronze: fetch one year at a time ─────────────────────────────────────────
+## Bronze layer
 def fetch_year(station_id, year):
+    global NOAA_CALLS
     url     = "https://www.ncei.noaa.gov/cdo-web/api/v2/data"
     headers = {"token": NOAA_TOKEN}
     rows, offset = [], 1
+    rate_limited = 0
 
     while True:
         params = {
@@ -250,15 +263,24 @@ def fetch_year(station_id, year):
         page = None
         for attempt in range(3):
             try:
+                NOAA_CALLS += 1
                 r = requests.get(url, params=params, headers=headers, timeout=30)
                 if r.status_code == 429:
-                    time.sleep(5)
+                    if rate_limited >= len(QUOTA_BACKOFF_S):
+                        raise QuotaExhausted(f"{station_id} {year}: still 429 after "
+                                             f"{sum(QUOTA_BACKOFF_S)}s backoff — daily cap likely hit")
+                    wait = QUOTA_BACKOFF_S[rate_limited]
+                    rate_limited += 1
+                    print(f"    NOAA 429 — backing off {wait}s ({rate_limited}/{len(QUOTA_BACKOFF_S)})")
+                    time.sleep(wait)
                     continue
                 if r.status_code != 200:
                     print(f"    NOAA {r.status_code} for {year}")
                     return rows
                 page = r.json().get("results", [])
                 break
+            except QuotaExhausted:
+                raise
             except Exception as e:
                 print(f"    Retry {attempt + 1} for {year}: {e}")
                 time.sleep(2)
@@ -280,9 +302,21 @@ def fetch_noaa(station_cfg, years):
         print("  No NOAA_TOKEN — skipping fetch.")
         return None
 
+    global QUOTA_EXHAUSTED
+    if QUOTA_EXHAUSTED:
+        print("  NOAA quota exhausted earlier this run — skipping fetch.")
+        return None
+
     all_rows = []
     for year in years:
-        rows = fetch_year(station_cfg["id"], year)
+        try:
+            rows = fetch_year(station_cfg["id"], year)
+        except QuotaExhausted as e:
+            # Discard this station's partial rows entirely: a half-fetched year
+            # must never reach the cache or the gold file.
+            print(f"  ✗ {e}")
+            QUOTA_EXHAUSTED = True
+            return None
         all_rows.extend(rows)
         print(f"    {year}: {len(rows)} records")
         time.sleep(0.5)
@@ -534,6 +568,17 @@ def main():
             print(f"  cache miss — full fetch {START_YEAR}–{END_YEAR}")
 
         df_raw = fetch_noaa(cfg, years)
+
+        # Quota hit: keep last run's gold block for this station untouched.
+        # Nothing is cached, so the next run with quota refetches cleanly.
+        if QUOTA_EXHAUSTED:
+            if existing and code in existing:
+                print(f"  Quota exhausted — carrying forward existing gold block for {code}")
+                result[code] = dict(existing[code], quota_truncated=True)
+            else:
+                print(f"  Quota exhausted and no existing block for {code} — skipping")
+            continue
+
         fresh  = (process(df_raw)
                   if df_raw is not None and not df_raw.empty else None)
 
@@ -602,6 +647,12 @@ def main():
     result["stations"]         = build_station_roster(result)
     result["stations_summary"] = summarize_roster(result["stations"])
 
+    result["unexpected_stale"] = [u.split()[0] for u in unexpected]
+    result["quota_exhausted"]  = QUOTA_EXHAUSTED
+    result["noaa_calls"]       = NOAA_CALLS
+
+    # Write BEFORE any staleness exit — the healthy cities should still update.
+
     # Write BEFORE any staleness exit — the healthy cities should still update.
     OUT_PATH.write_text(json.dumps(result, separators=(",", ":")))
     print(f"\n✅ Written to {OUT_PATH} (data_through={result['data_through']})")
@@ -619,7 +670,16 @@ def main():
         if summary:
             with open(summary, "a") as fh:
                 fh.write(f"### ⚠ {msg}\n")
-        result["unexpected_stale"] = [u.split()[0] for u in unexpected]
+
+    if QUOTA_EXHAUSTED:
+        carried = [c for c in STATIONS if result.get(c, {}).get("quota_truncated")]
+        msg = (f"NOAA QUOTA EXHAUSTED after {NOAA_CALLS} calls — "
+               f"carried forward: {', '.join(carried) or 'none'}")
+        print(f"::warning title=NOAA quota::{msg}")
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with open(summary, "a") as fh:
+                fh.write(f"### ⚠ {msg}\n")
 
 
 if __name__ == "__main__":
