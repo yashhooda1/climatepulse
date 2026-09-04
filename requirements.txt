@@ -1,5 +1,9 @@
-pandas
-numpy
-scikit-learn
-matplotlib
-pyarrow
+# pipelines (scripts/)
+pandas>=2.2,<3
+numpy>=1.26,<3
+pyarrow>=17,<26
+requests>=2.32,<3
+
+# legacy src/ + main.py only
+scikit-learn>=1.5,<2
+matplotlib>=3.9,<4
