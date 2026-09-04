@@ -7,6 +7,7 @@ BOXES = {  # south, west, north, east — ~50km around each city
     "rome":   (41.60, 12.10, 42.05, 12.75),
     "delhi":  (28.35, 76.85, 28.90, 77.45),
     "london": (51.30, -0.55, 51.70, 0.20),
+    "brussels": (50.60,  4.10, 51.10, 4.80),   # covers Uccle, Zaventem, Beauvechain, Melsbroek
 }
 
 city = sys.argv[1].lower()
