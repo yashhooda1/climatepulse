@@ -177,6 +177,7 @@ def build_station_roster(result):
             "lag_days":        blk["lag_days"],
             "record_start":    yrs[0]["year"],
             "record_end":      yrs[-1]["year"],
+            "record_current":  yrs[-1]["year"] >= END_YEAR - 1,
             "complete_years":  blk["n_years"],
             "rejected_years":  len(blk.get("rejected_years") or []),
             "mean_coverage":   round(sum(cov) / len(cov), 3) if cov else None,
@@ -627,7 +628,7 @@ def main():
             sys.exit(f"Empty yearly for {code} — aborting.")
 
     # ── Freshness audit ──────────────────────────────────────────────────────
-    today, unexpected = datetime.now(timezone.utc).date(), []
+    today, unexpected, regressed = datetime.now(timezone.utc).date(), [], []
     for code in STATIONS:
         blk  = result[code]
         last = ((blk.get("ytd") or blk.get("heat_ytd") or {}).get("last_date")
@@ -640,9 +641,26 @@ def main():
         if blk["stale"] and code not in KNOWN_STALE:
             unexpected.append(f"{code} ({last}, {lag}d)")
 
+        # Coverage should never move backwards. When it does, the upstream feed
+        # withdrew rows we already published — a data event, not a lag event,
+        # which the absolute threshold above cannot catch.
+        prev = (existing or {}).get(code, {}).get("last_data_date")
+        blk["prev_data_date"] = prev
+        if prev and prev > last:
+            lost = (datetime.strptime(prev, "%Y-%m-%d").date()
+                    - datetime.strptime(last, "%Y-%m-%d").date()).days
+            regressed.append(f"{code} ({prev} → {last}, -{lost}d)")
+
     fresh_codes = [c for c in STATIONS if not result[c]["stale"]]
-    result["data_through"]   = (min(result[c]["last_data_date"] for c in fresh_codes)
-                                if fresh_codes else None)
+    fresh_dates = sorted(result[c]["last_data_date"] for c in fresh_codes)
+    # data_through is what the dashboard can honestly claim to show: the
+    # freshest reporting station. The min is the laggard — published separately
+    # so one sparse feed can't make the whole file read two months stale.
+    result["data_through"]     = fresh_dates[-1] if fresh_dates else None
+    result["data_through_min"] = fresh_dates[0]  if fresh_dates else None
+    result["laggard"]          = (min(fresh_codes,
+                                      key=lambda c: result[c]["last_data_date"])
+                                  if fresh_codes else None)
     result["stale_stations"] = [c for c in STATIONS if result[c]["stale"]]
     result["generated_at"]   = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     result["station_codes"]  = list(STATIONS.keys())
@@ -650,6 +668,7 @@ def main():
     result["stations_summary"] = summarize_roster(result["stations"])
 
     result["unexpected_stale"] = [u.split()[0] for u in unexpected]
+    result["regressed"]        = regressed
     result["quota_exhausted"]  = QUOTA_EXHAUSTED
     result["noaa_calls"]       = NOAA_CALLS
 
@@ -668,6 +687,14 @@ def main():
     if unexpected:
         msg = "NEW STALE STATIONS: " + ", ".join(unexpected)
         print(f"::warning title=New stale stations::{msg}")
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with open(summary, "a") as fh:
+                fh.write(f"### ⚠ {msg}\n")
+
+    if regressed:
+        msg = "COVERAGE REGRESSED — " + ", ".join(regressed)
+        print(f"::warning title=Coverage regression::{msg}")
         summary = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary:
             with open(summary, "a") as fh:
