@@ -47,7 +47,7 @@ jobs:
       - name: Run pipeline
         env:
           NOAA_TOKEN:   ${{ secrets.NOAA_TOKEN }}
-          FULL_REFRESH: ${{ (github.event.schedule == '0 3 1 * *' || inputs.full_refresh == true) && '1' || '0' }}
+          FULL_REFRESH: ${{ (github.event.schedule == '0 3 1 * *' || inputs.full_refresh == true) && 'true' || 'false' }}
         run: python scripts/climate_pipeline.py
 
       - name: Build hurricane analytics
