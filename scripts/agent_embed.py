@@ -38,12 +38,17 @@ def embed_text(text, api_key, post=_post_json):
     return data["data"][0]["embedding"]
 
 
-def build_chunk(coding, now):
+def build_chunk(gold, now):
+    coding = gold.get("coding", {})
+    window = gold.get("window", {})
+    start, end = window.get("start"), window.get("end")
+    span = f"{start} to {end}" if start and end else "the last completed week"
     repos = ", ".join(f"{r['name']} ({r['commits']} commits)" for r in coding.get("active_repos", [])) \
-            or "no public repositories this week"
-    return (f"Yash's recent coding activity (auto-updated weekly, as of {now.date().isoformat()}): "
-            f"{coding.get('summary', '').strip()} Active repositories this week: {repos}. "
-            f"This reflects what Yash is currently building.")
+            or "no public repositories that week"
+    return (f"Yash's coding activity for the week of {span} (Mon-Sun, auto-updated every Monday; "
+            f"snapshot taken {now.date().isoformat()}): "
+            f"{coding.get('summary', '').strip()} Active repositories that week: {repos}. "
+            f"This reflects what Yash has most recently been building.")
 
 
 def upsert_vector(vec_url, vec_token, vector, text, now, post=_post_json):
@@ -67,7 +72,7 @@ def main(post=_post_json):
         print(f"No agent_context_gold.json to embed ({e}) — skipping.")
         return
 
-    chunk = build_chunk(gold.get("coding", {}), now)
+    chunk = build_chunk(gold, now)
     try:
         vector = embed_text(chunk, openai_key, post=post)
         if not isinstance(vector, list) or len(vector) < 100:
