@@ -3,14 +3,19 @@ agent_context_pipeline.py — ClimatePulse "Live Context" pipeline.
 
 Refreshes the yashhooda.ai AI agent's knowledge from Yash's real activity so the
 Running / Projects / General agents answer with CURRENT facts instead of stale
-hardcoded ones. Pulls the last 7 days from Strava (running) and GitHub (coding),
-distills them to compact summaries + structured fields, and writes
-agent_context_gold.json at repo root. Stdlib only.
+hardcoded ones. Covers the last COMPLETED Mon-Sun week in America/Chicago — not a
+rolling 7-day window — so the numbers are identical no matter when the job fires,
+and always describe a finished week rather than a partial one. Pulls that window
+from Strava (running) and GitHub (coding), distills it to compact summaries +
+structured fields, and writes agent_context_gold.json at repo root. Stdlib only.
+
+Must run AFTER Monday 00:00 America/Chicago (>= 06:00 UTC year-round). Firing
+before that boundary would return the week before the one just completed.
 
 Consumed two ways:
   1. Structured injection — chat.js appends running.summary / coding.summary to the
      routed agent's system prompt (a few hundred tokens, always fresh).
-  2. Dashboard — the "This Week" section renders the structured fields.
+  2. Dashboard — the "Last Week" section renders the structured fields.
   (A separate embed step feeds the RAG layer into Upstash Vector.)
 
 Secrets (climatepulse repo): STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET,
