@@ -20,10 +20,11 @@ STRAVA_REFRESH_TOKEN, and optionally GITHUB_TOKEN (higher rate limit).
 import json, os, urllib.request, urllib.parse, urllib.error
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 OUT_PATH = Path(__file__).parent.parent / "agent_context_gold.json"
 GH_USER  = "yashhooda1"
-BOULDERTHON = datetime(2026, 9, 27, tzinfo=timezone.utc)
+CHICAGO  = ZoneInfo("America/Chicago")
 HOUSTON_MARATHON = datetime(2027, 1, 17, tzinfo=timezone.utc)
 METERS_PER_MILE = 1609.34
 UA = "ClimatePulse/1.0 (agent-context)"
@@ -48,6 +49,36 @@ def _pace(moving_time_s, meters):
         return None
     spm = moving_time_s / miles
     return f"{int(spm // 60)}:{int(spm % 60):02d}"
+
+def last_week_bounds(now):
+    """Previous completed Mon 00:00 → next Mon 00:00 (exclusive), America/Chicago.
+
+    Pinned to the calendar week rather than `now - 7 days` so the window is
+    identical no matter what time the cron fires. Built from dates, not
+    timedelta arithmetic on an aware datetime, so DST weekends stay exact.
+    """
+    local_date  = now.astimezone(CHICAGO).date()
+    this_monday = local_date - timedelta(days=local_date.weekday())  # Mon=0
+    last_monday = this_monday - timedelta(days=7)
+    start = datetime.combine(last_monday, datetime.min.time(), tzinfo=CHICAGO)
+    end   = datetime.combine(this_monday, datetime.min.time(), tzinfo=CHICAGO)
+    return start, end
+
+
+def _in_window(activity, start, end):
+    """Compare against start_date (true UTC instant), not start_date_local."""
+    raw = activity.get("start_date") or ""
+    if not raw:
+        return False
+    try:
+        dt = datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    return start <= dt < end
+
+
+def _md(d):
+    return f"{d.strftime('%b')} {d.day}"
 
 
 # ── STRAVA ────────────────────────────────────────────────────────────────────
@@ -86,37 +117,47 @@ def strava_access_token(fetch_post=_post_form):
     return at
 
 
-def build_running(activities, now):
-    """activities: list of Strava activity dicts (already fetched). -> running block."""
-    runs = [a for a in activities if (a.get("type") or a.get("sport_type")) == "Run"]
+def build_running(activities, now, start, end):
+    """activities: list of Strava activity dicts. -> running block for last week."""
+    runs = [a for a in activities
+            if (a.get("type") or a.get("sport_type")) == "Run" and _in_window(a, start, end)]
     total_m = sum(a.get("distance", 0) for a in runs)
     week_miles = round(total_m / METERS_PER_MILE, 1)
     recent = []
     for a in sorted(runs, key=lambda x: x.get("start_date", ""), reverse=True)[:5]:
         miles = round(a.get("distance", 0) / METERS_PER_MILE, 1)
         recent.append({
-            "date": (a.get("start_date", "") or "")[:10],
+            "date": (a.get("start_date_local", "") or a.get("start_date", "") or "")[:10],
             "name": a.get("name", "Run"),
             "miles": miles,
             "pace": _pace(a.get("moving_time", 0), a.get("distance", 0)),
         })
-    long_run = max((r["miles"] for r in recent), default=0)
-    long_pace = next((r["pace"] for r in recent if r["miles"] == long_run), None)
+    # Longest run across the whole week, not just the 5 shown in `recent`.
+    longest = max(runs, key=lambda a: a.get("distance", 0), default=None)
+    long_run  = round(longest.get("distance", 0) / METERS_PER_MILE, 1) if longest else 0
+    long_pace = _pace(longest.get("moving_time", 0), longest.get("distance", 0)) if longest else None
     days_to = max(0, (HOUSTON_MARATHON - now).days)
-    summary = (f"{week_miles} mi over the last 7 days across {len(runs)} run(s)"
+    span = f"{_md(start)}–{_md(end - timedelta(days=1))}"
+    summary = (f"{week_miles} mi last week ({span}) across {len(runs)} run(s)"
                + (f"; longest {long_run} mi" + (f" @ {long_pace}/mi" if long_pace else "") if long_run else "")
                + f". {days_to} days to the Chevron Houston marathon (Jan 17, 2027).")
     return {"week_miles": week_miles, "week_runs": len(runs), "recent": recent,
-            "longest_run_miles": long_run, "days_to_chevron": days_to,
-            "days_to_houston": max(0, (HOUSTON_MARATHON - now).days), "summary": summary}
+            "longest_run_miles": long_run,
+            "days_to_chevron_houston_marathon": days_to,
+            "days_to_chevron": days_to,
+            "days_to_houston": days_to,
+            "week_start": start.date().isoformat(),
+            "week_end": (end - timedelta(days=1)).date().isoformat(),
+            "summary": summary}
 
 
 # ── GITHUB ────────────────────────────────────────────────────────────────────
-def build_coding(now, fetch=_get, headers=None):
+def build_coding(now, start, end, fetch=_get, headers=None):
     """Reliable coding activity: list repos by push time, then count Yash-authored
     commits per repo from the commits API. The public events feed is cached and
     abbreviates commit data, so we query repo state directly instead."""
-    cutoff_iso = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cutoff_iso = start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    until_iso  = end.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     active = []
     repos = fetch(f"https://api.github.com/users/{GH_USER}/repos?sort=pushed&per_page=30&type=owner",
                   headers=headers)
@@ -127,7 +168,7 @@ def build_coding(now, fetch=_get, headers=None):
             name = r.get("name", "")
             commits = fetch(
                 f"https://api.github.com/repos/{GH_USER}/{name}/commits"
-                f"?since={cutoff_iso}&author={GH_USER}&per_page=100", headers=headers)
+                f"?since={cutoff_iso}&until={until_iso}&author={GH_USER}&per_page=100", headers=headers)
             n = len(commits) if isinstance(commits, list) else 0
             if n > 0:
                 active.append({"name": name, "commits": n, "language": r.get("language")})
@@ -138,16 +179,20 @@ def build_coding(now, fetch=_get, headers=None):
     if total:
         langs = sorted({a["language"] for a in active if a.get("language")})
         lang_str = f" ({', '.join(langs)})" if langs else ""
-        summary = f"{total} commit(s) this week across {len(active)} repo(s){lang_str}; most active: {focus}."
+        summary = f"{total} commit(s) last week across {len(active)} repo(s){lang_str}; most active: {focus}."
     else:
-        summary = "No GitHub commits authored in the last 7 days."
+        summary = "No GitHub commits authored last week."
     return {"week_commits": total, "active_repos": active, "current_focus": focus, "summary": summary}
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 def main(strava_fetch=_get, strava_token=None, gh_fetch=_get):
     now = datetime.now(timezone.utc)
-    after = int((now - timedelta(days=7)).timestamp())
+    start, end = last_week_bounds(now)
+    # Fetch a day wider on each side, then filter precisely in _in_window —
+    # Strava's after/before semantics are ambiguous about local vs UTC.
+    after  = int((start - timedelta(days=1)).timestamp())
+    before = int((end + timedelta(days=1)).timestamp())
 
     # Running
     running = {"week_miles": 0, "week_runs": 0, "recent": [],
@@ -156,10 +201,10 @@ def main(strava_fetch=_get, strava_token=None, gh_fetch=_get):
         token = strava_token if strava_token is not None else strava_access_token()
         if token:
             acts = strava_fetch(
-                f"https://www.strava.com/api/v3/athlete/activities?after={after}&per_page=50",
+                f"https://www.strava.com/api/v3/athlete/activities?after={after}&before={before}&per_page=100",
                 headers={"Authorization": f"Bearer {token}", "User-Agent": UA})
-            print(f"Strava: fetched {len(acts) if isinstance(acts, list) else '??'} activity(ies) in the last 7 days")
-            running = build_running(acts, now)
+            print(f"Strava: fetched {len(acts) if isinstance(acts, list) else '??'} activity(ies) around {start.date()}–{(end - timedelta(days=1)).date()}")
+            running = build_running(acts, now, start, end)
     except Exception as e:
         print(f"Strava step failed ({e}) — keeping placeholder.")
 
@@ -169,7 +214,7 @@ def main(strava_fetch=_get, strava_token=None, gh_fetch=_get):
         headers = {"User-Agent": UA, "Accept": "application/vnd.github+json"}
         if os.environ.get("GITHUB_TOKEN"):
             headers["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
-        coding = build_coding(now, fetch=gh_fetch, headers=headers)
+        coding = build_coding(now, start, end, fetch=gh_fetch, headers=headers)
         print(f"GitHub: {coding['week_commits']} commit(s) across {len(coding['active_repos'])} active repo(s)")
     except Exception as e:
         print(f"GitHub step failed ({e}) — keeping placeholder.")
@@ -177,6 +222,9 @@ def main(strava_fetch=_get, strava_token=None, gh_fetch=_get):
     result = {
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": "Strava API (activities) · GitHub public events",
+        "window": {"label": "last week", "start": start.date().isoformat(),
+                   "end": (end - timedelta(days=1)).date().isoformat(),
+                   "timezone": "America/Chicago"},
         "running": running,
         "coding": coding,
     }
