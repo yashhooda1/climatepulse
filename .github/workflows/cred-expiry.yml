@@ -1,0 +1,72 @@
+name: Credential expiry check
+
+# Lives in climatepulse (NOT the deployed site). Reads YASHHOODA_PAT's expiry
+# from the GitHub-Authentication-Token-Expiration response header, probes every
+# other pipeline credential for liveness, and opens a deduped reminder issue in
+# THIS repo when something needs renewing. Touches no site files.
+#
+# YASHHOODA_PAT is the single point of failure for the live dashboards: when it
+# lapses, climate-refresh / co2-refresh / agent-context all stay green through
+# every step before the push while the site quietly serves stale data.
+
+on:
+  schedule:
+    - cron: '0 7 8 * *'      # monthly, 8th @ 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # cred_expiry_check.py is stdlib-only — no pip install step needed.
+
+      - name: Run credential check
+        id: check
+        env:
+          WARN_DAYS: '30'
+          SITE_REPO: 'yashhooda1/yashhooda'
+          YASHHOODA_PAT:             ${{ secrets.YASHHOODA_PAT }}
+          NOAA_TOKEN:                ${{ secrets.NOAA_TOKEN }}
+          EIA_API_KEY:               ${{ secrets.EIA_API_KEY }}
+          OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+          UPSTASH_VECTOR_REST_URL:   ${{ secrets.UPSTASH_VECTOR_REST_URL }}
+          UPSTASH_VECTOR_REST_TOKEN: ${{ secrets.UPSTASH_VECTOR_REST_TOKEN }}
+        run: python scripts/cred_expiry_check.py
+
+      - name: Open reminder issue (deduped)
+        if: steps.check.outputs.due == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create credentials --color D93F0B \
+            --description "Pipeline credential needs renewing" 2>/dev/null || true
+          existing=$(gh issue list --state open --search "Pipeline credentials: renewal needed" \
+                     --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Open reminder already exists (#$existing) — commenting instead."
+            gh issue comment "$existing" --body-file cred_refresh_issue.md
+          else
+            gh issue create \
+              --title "🔑 Pipeline credentials: renewal needed" \
+              --label credentials \
+              --body-file cred_refresh_issue.md
+          fi
+
+      # A dead credential is an outage, not a reminder — go red so the failure
+      # notification lands in your inbox alongside the issue.
+      - name: Fail on a dead credential
+        if: steps.check.outputs.dead == 'true'
+        run: |
+          echo "::error title=Dead credential::a pipeline credential is revoked, expired, or lost access"
+          exit 1
