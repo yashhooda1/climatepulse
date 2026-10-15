@@ -15,6 +15,8 @@ jobs:
         with: { python-version: '3.11' }
       - run: pip install "pandas>=2.2,<3" requests
       - run: python scripts_probe.py
+        env:
+          NOAA_TOKEN: ${{ secrets.NOAA_TOKEN }}
       - run: |
           git config user.name "github-actions[bot]"; git config user.email "github-actions[bot]@users.noreply.github.com"
           git add probe_result.json; git commit -m "chore: probe result [skip ci]" || true
