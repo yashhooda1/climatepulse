@@ -1,7 +1,8 @@
 """
 ClimatePulse v2 — Bronze → Silver → Gold pipeline
-14 stations: Austin (home), Houston, Newark, Delhi, London, Dallas, Denver,
-Helsinki, Rome, Brussels, Paris, Amsterdam, Chicago, and Los Angeles.
+17 stations: Austin (home), Houston, Newark, Delhi, London, Dallas, Denver,
+Helsinki, Rome, Brussels, Paris, Amsterdam, Chicago, Los Angeles,
+San Francisco, Seattle, and New York City.
 
 Austin and Houston also carry a humidity layer (dew point, mean RH, afternoon
 RH) from NOAA's access-services API, plus a computed Austin-vs-Houston block
@@ -145,6 +146,24 @@ STATIONS = {
         "metric":   True,
         "color":    "#fb923c",
     },
+    "SFO": {
+        "id":       "USW00023234",     # San Francisco Intl
+        "name":     "San Francisco, CA",
+        "metric":   False,
+        "color":    "#38bdf8",
+    },
+    "SEA": {
+        "id":       "USW00024233",     # Seattle-Tacoma Intl
+        "name":     "Seattle, WA",
+        "metric":   False,
+        "color":    "#94a3b8",
+    },
+    "NYC": {
+        "id":       "USW00094728",     # Central Park — official NYC record
+        "name":     "New York City, NY",
+        "metric":   False,
+        "color":    "#fde68a",
+    },
 }
 
 DAILY_COLS = ["date", "year", "month", "tmax", "tmin", "tmean"]
@@ -164,6 +183,8 @@ STATION_NOTES = {
     "FCO": "Ciampino: last complete year 2011, feed dead since Aug 2025.",
     "DEL": "0.79 coverage, 12 years rejected; NCEI relay dead since Aug 2025.",
     "LHR": "Swapped to UKE00105900 after the Heathrow feed thinned out.",
+    "NYC": "Central Park — New York City's official record station.",
+    "SFO": "San Francisco Intl — bayside airport, not downtown.",
 }
  
 CATALOG_URL = ("https://www.ncei.noaa.gov/access/search/data-search/"
