@@ -20,7 +20,7 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 
 | Pipeline | Source | Output | Cadence |
 |---|---|---|---|
-| `climate_pipeline.py` | NOAA GHCN-Daily (17 stations) + humidity (AUS/IAH) | `public_data_climate_gold.json` | Daily |
+| `climate_pipeline.py` | NOAA GHCN-Daily (21 stations) + humidity (AUS/IAH) | `public_data_climate_gold.json` | Daily |
 | `hurricane_pipeline.py` | HURDAT2 · NOAA PSL SST · NASA GISTEMP | `public_data_hurricanes_gold.json` | Daily |
 | `sealevel_pipeline.py` | NOAA/STAR satellite altimetry | `public_data_sealevel_gold.json` | Daily |
 | `eia_grid_pipeline.py` | EIA API v2 (`ELETPUS`) | `public_data_us_grid_gold.json` | Daily |
@@ -30,7 +30,7 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 
 ### 🌡 Climate — the core pipeline
 
-**Bronze → Silver → Gold** across **17 NOAA stations**, 1970–present. **Austin is the home station**; Houston is kept as its reference:
+**Bronze → Silver → Gold** across **21 NOAA stations**, 1970–present. **Austin is the home station**; Houston is kept as its reference:
 
 | Code | Station | GHCN ID | Climate |
 |---|---|---|---|
@@ -51,6 +51,10 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 | SFO | San Francisco, CA | `USW00023234` | Cool-summer Mediterranean, marine layer (SFO airport) |
 | SEA | Seattle, WA | `USW00024233` | Marine west coast (Sea-Tac) |
 | NYC | New York City, NY | `USW00094728` | Humid subtropical/continental edge (Central Park) |
+| BOS | Boston, MA | `USW00014739` | Humid continental, coastal (Logan) |
+| MIA | Miami, FL | `USW00012839` | Tropical monsoon (Miami Intl) |
+| ATL | Atlanta, GA | `USW00013874` | Humid subtropical, ~1,000 ft (Hartsfield-Jackson) |
+| DCA | Washington, DC | `USW00013743` | Humid subtropical (Reagan National) |
 
 #### 🏠 Austin vs Houston — winters and humidity
 
@@ -78,6 +82,10 @@ python find_stations.py        # discovers + TMAX-verifies candidates, prints pa
 ```
 
 It queries NOAA's station catalog by country, filters to stations spanning 1970→now, probes each for `TMAX` at the start/middle/end of the record, and falls through to the next candidate if one has gaps.
+
+#### 📦 Bulk fetches and the NOAA quota
+
+NOAA's CDO API allows 1,000 calls/day and is fetched one station-year per call, so a full 1970→present rebuild of 21 stations would need ~1,200 calls. Big fetches (the monthly `FULL_REFRESH` and a new station's first load) therefore go through NOAA's access-services API instead: the same GHCN-Daily records, one request per station, no token, no quota. The daily incremental (2 years per station) stays on CDO. Each path falls back to the other if it fails.
 
 #### 📉 Data-quality guards
 
@@ -112,7 +120,7 @@ From the current gold data (57 years, 1970–present):
 
 Two patterns hold across stations: **winter nighttime lows warm faster than annual averages** — a greenhouse-gas fingerprint distinct from urban heat island effects — and low-latitude cities show the sharpest growth in extreme-heat days.
 
-With 17 stations the dataset now spans a genuine climatic range: **Helsinki at 60°N** (high-latitude amplification, where warming should be fastest), through the **maritime European cluster** (Amsterdam, Brussels, Paris, London — sea-moderated, narrow seasonal swings), to **Mediterranean Rome**, **continental Chicago**, **coastal Los Angeles**, and **monsoon Delhi**. That spread is the point: the same regression run against very different climates.
+With 21 stations the dataset now spans a genuine climatic range: **Helsinki at 60°N** (high-latitude amplification, where warming should be fastest), through the **maritime European cluster** (Amsterdam, Brussels, Paris, London — sea-moderated, narrow seasonal swings), to **Mediterranean Rome**, **continental Chicago**, **coastal Los Angeles**, and **monsoon Delhi**. That spread is the point: the same regression run against very different climates.
 
 > Dashboard "Signal" lines are **computed from this gold data at render time**, not hardcoded — so no figure in the UI can drift from what the pipeline actually produced. Per-decade numbers for newly added stations populate on their first full run.
 

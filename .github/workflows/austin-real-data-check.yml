@@ -20,7 +20,7 @@ jobs:
       - name: Run climate pipeline (real NOAA data)
         env:
           NOAA_TOKEN: ${{ secrets.NOAA_TOKEN }}
-          FULL_REFRESH: 'false'
+          FULL_REFRESH: 'true'
         run: python scripts/climate_pipeline.py
       - name: Commit real output to this throwaway branch only
         run: |
