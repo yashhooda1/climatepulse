@@ -238,7 +238,8 @@ STATION_NOTES = {
     "NYC": "Central Park — New York City's official record station.",
     "SFO": "San Francisco Intl — bayside airport, not downtown.",
     "DCA": "Reagan National — Washington DC's official record station.",
-    "YYZ": "Toronto Pearson — stitched across Environment Canada's 2013 ID change (CAN06158733 → CAN06158731).",
+    "YYZ": "Toronto Pearson — stitched across Environment Canada's 2013 ID change (CAN06158733 → CAN06158731); the pre-2013 ID alone gives an even steeper trend, so the seam isn't driving it.",
+    "MCO": "Orlando Intl — NOAA has no complete years 1971–1974, so the trend fits 52 of 56.",
 }
  
 CATALOG_URL = ("https://www.ncei.noaa.gov/access/search/data-search/"
