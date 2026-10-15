@@ -1,8 +1,13 @@
 """
 ClimatePulse v2 — Bronze → Silver → Gold pipeline
-17 stations: Austin (home), Houston, Newark, Delhi, London, Dallas, Denver,
+21 stations: Austin (home), Houston, Newark, Delhi, London, Dallas, Denver,
 Helsinki, Rome, Brussels, Paris, Amsterdam, Chicago, Los Angeles,
-San Francisco, Seattle, and New York City.
+San Francisco, Seattle, New York City, Boston, Miami, Atlanta, and
+Washington DC.
+
+Big fetches (monthly FULL_REFRESH, a new station's first load) use NOAA's
+access-services API — one request per station, no CDO quota. The daily
+incremental uses CDO; either falls back to the other.
 
 Austin and Houston also carry a humidity layer (dew point, mean RH, afternoon
 RH) from NOAA's access-services API, plus a computed Austin-vs-Houston block
@@ -164,6 +169,30 @@ STATIONS = {
         "metric":   False,
         "color":    "#fde68a",
     },
+    "BOS": {
+        "id":       "USW00014739",     # Boston Logan
+        "name":     "Boston, MA",
+        "metric":   False,
+        "color":    "#c4b5fd",
+    },
+    "MIA": {
+        "id":       "USW00012839",     # Miami Intl
+        "name":     "Miami, FL",
+        "metric":   False,
+        "color":    "#f9a8d4",
+    },
+    "ATL": {
+        "id":       "USW00013874",     # Hartsfield-Jackson
+        "name":     "Atlanta, GA",
+        "metric":   False,
+        "color":    "#bef264",
+    },
+    "DCA": {
+        "id":       "USW00013743",     # Reagan National — official DC record
+        "name":     "Washington, DC",
+        "metric":   False,
+        "color":    "#e2e8f0",
+    },
 }
 
 DAILY_COLS = ["date", "year", "month", "tmax", "tmin", "tmean"]
@@ -185,6 +214,7 @@ STATION_NOTES = {
     "LHR": "Swapped to UKE00105900 after the Heathrow feed thinned out.",
     "NYC": "Central Park — New York City's official record station.",
     "SFO": "San Francisco Intl — bayside airport, not downtown.",
+    "DCA": "Reagan National — Washington DC's official record station.",
 }
  
 CATALOG_URL = ("https://www.ncei.noaa.gov/access/search/data-search/"
@@ -347,7 +377,55 @@ def fetch_year(station_id, year):
         time.sleep(0.25)
 
 
+def fetch_bulk(station_cfg, years):
+    """Whole year range in ONE request from NOAA's access-services API — the
+    same GHCN-Daily data, but no token and no CDO 1,000/day quota. Used for
+    big fetches (monthly full rebuild, a new station's first load), which at
+    21 stations would otherwise need ~1,200 CDO calls. Returns rows in CDO's
+    shape (date, datatype, value) so process() is unchanged, or None so the
+    caller can fall back to CDO."""
+    params = {
+        "dataset":   "daily-summaries",
+        "stations":  station_cfg["id"],
+        "startDate": f"{min(years)}-01-01",
+        "endDate":   f"{max(years)}-12-31",
+        "dataTypes": "TMAX,TMIN",
+        "format":    "csv",
+        "units":     "standard",       # °F, same as CDO units=standard
+    }
+    for attempt in range(3):
+        try:
+            r = requests.get(HUMIDITY_URL, params=params, timeout=180)
+            if r.status_code != 200:
+                print(f"    bulk HTTP {r.status_code} (attempt {attempt + 1})")
+                time.sleep(5 * (attempt + 1))
+                continue
+            df = pd.read_csv(io.StringIO(r.text))
+            df.columns = [c.strip().lower() for c in df.columns]
+            if df.empty or "date" not in df.columns:
+                return None
+            cols = [c for c in ("tmax", "tmin") if c in df.columns]
+            long = df.melt(id_vars="date", value_vars=cols,
+                           var_name="datatype", value_name="value").dropna(subset=["value"])
+            long["datatype"] = long["datatype"].str.upper()
+            print(f"    bulk: {len(long)} records {min(years)}–{max(years)} in 1 request")
+            return long if not long.empty else None
+        except Exception as e:
+            print(f"    bulk fetch failed (attempt {attempt + 1}): {e}")
+            time.sleep(5 * (attempt + 1))
+    return None
+
+
+BULK_MIN_YEARS = 3   # fetches longer than this go through fetch_bulk first
+
+
 def fetch_noaa(station_cfg, years):
+    if len(years) > BULK_MIN_YEARS:
+        bulk = fetch_bulk(station_cfg, years)
+        if bulk is not None:
+            return bulk
+        print("    bulk unavailable — falling back to CDO year-by-year")
+
     if not NOAA_TOKEN:
         print("  No NOAA_TOKEN — skipping fetch.")
         return None
@@ -792,7 +870,8 @@ def main():
 
         # Quota hit: keep last run's gold block for this station untouched.
         # Nothing is cached, so the next run with quota refetches cleanly.
-        if QUOTA_EXHAUSTED:
+        # A station the bulk API served is unaffected by the CDO quota.
+        if QUOTA_EXHAUSTED and df_raw is None:
             if existing and code in existing:
                 print(f"  Quota exhausted — carrying forward existing gold block for {code}")
                 result[code] = dict(existing[code], quota_truncated=True)
