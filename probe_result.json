@@ -1,0 +1,219 @@
+{
+ "catalog": [
+  {
+   "id": "CAN06158731",
+   "name": "TORONTO INTERNATIONAL A, CA",
+   "min": "2013-06-13",
+   "max": "2026-10-10",
+   "cov": 0.9945
+  },
+  {
+   "id": "CAN06158355",
+   "name": "TORONTO CITY, CA",
+   "min": "2002-06-04",
+   "max": "2026-10-10",
+   "cov": 0.9873
+  },
+  {
+   "id": "CAN06158359",
+   "name": "TORONTO CITY CENTRE, CA",
+   "min": "2010-02-02",
+   "max": "2026-10-10",
+   "cov": 0.9469
+  },
+  {
+   "id": "CAN0615S001",
+   "name": "TORONTO NORTH YORK, CA",
+   "min": "1994-11-01",
+   "max": "2026-10-03",
+   "cov": 0.974
+  },
+  {
+   "id": "CAN06152695",
+   "name": "GEORGETOWN WWTP, CA",
+   "min": "1962-08-01",
+   "max": "2026-07-22",
+   "cov": 0.8487
+  },
+  {
+   "id": "CAN06158409",
+   "name": "TORONTO BUTTONVILLE A, CA",
+   "min": "2018-10-29",
+   "max": "2023-10-04",
+   "cov": 0.9911
+  },
+  {
+   "id": "CAN06155750",
+   "name": "OAKVILLE TWN, CA",
+   "min": "2007-01-30",
+   "max": "2023-09-10",
+   "cov": 0.9568
+  },
+  {
+   "id": "CAN06158410",
+   "name": "TORONTO BUTTONVILLE A, CA",
+   "min": "2015-05-21",
+   "max": "2019-01-02",
+   "cov": 0.9932
+  },
+  {
+   "id": "CAN06158350",
+   "name": "TORONTO, CA",
+   "min": "1840-03-01",
+   "max": "2017-04-27",
+   "cov": 0.9407
+  },
+  {
+   "id": "CAN06158751",
+   "name": "TORONTO EAST YORK DUSTAN, CA",
+   "min": "2007-05-25",
+   "max": "2015-07-31",
+   "cov": 1
+  },
+  {
+   "id": "CAN0615HMAK",
+   "name": "TORONTO BUTTONVILLE A, CA",
+   "min": "1986-05-23",
+   "max": "2015-05-20",
+   "cov": 0.9999
+  },
+  {
+   "id": "CAN06157012",
+   "name": "RICHMOND HILL, CA",
+   "min": "1959-06-01",
+   "max": "2014-02-28",
+   "cov": 0.9943
+  },
+  {
+   "id": "CAN06158733",
+   "name": "TORONTO LESTER B. PEARSON INT, CA",
+   "min": "1937-11-01",
+   "max": "2013-06-13",
+   "cov": 0.9933
+  },
+  {
+   "id": "CAN06158667",
+   "name": "TORONTO CITY CENTRE, CA",
+   "min": "2006-01-01",
+   "max": "2010-02-01",
+   "cov": 0.996
+  },
+  {
+   "id": "CAN06155680",
+   "name": "NOBLETON, CA",
+   "min": "2005-10-01",
+   "max": "2007-05-18",
+   "cov": 0.642
+  },
+  {
+   "id": "CAN06155PD4",
+   "name": "OAKVILLE GERARD, CA",
+   "min": "1990-04-01",
+   "max": "2006-10-31",
+   "cov": 0.9946
+  },
+  {
+   "id": "CAN06158665",
+   "name": "TORONTO ISLAND A, CA",
+   "min": "1957-05-01",
+   "max": "2006-03-31",
+   "cov": 0.9933
+  },
+  {
+   "id": "CAN06159575",
+   "name": "WOODBRIDGE, CA",
+   "min": "1948-10-01",
+   "max": "2005-05-31",
+   "cov": 0.9642
+  },
+  {
+   "id": "CAN0615N745",
+   "name": "OAKVILLE SOUTHEAST WPCP, CA",
+   "min": "1970-07-01",
+   "max": "2001-12-31",
+   "cov": 0.9772
+  },
+  {
+   "id": "CAN0615S004",
+   "name": "BOLTON NORTH, CA",
+   "min": "1995-10-01",
+   "max": "2001-09-30",
+   "cov": 0.9986
+  },
+  {
+   "id": "CAN06150103",
+   "name": "ALBION FIELD CENTRE, CA",
+   "min": "1969-05-01",
+   "max": "2001-03-31",
+   "cov": 0.9659
+  },
+  {
+   "id": "CAN06158578",
+   "name": "TORONTO HEADLAND AUT, CA",
+   "min": "1994-12-29",
+   "max": "1998-03-06",
+   "cov": 0.4716
+  },
+  {
+   "id": "CAN0615EAQG",
+   "name": "MILTON SOUTH, CA",
+   "min": "1993-10-01",
+   "max": "1997-07-31",
+   "cov": 0.9279
+  },
+  {
+   "id": "CAN06158763",
+   "name": "TOR OLD BURNHAMTHORPE, CA",
+   "min": "1973-12-01",
+   "max": "1995-07-31",
+   "cov": 0.4213
+  },
+  {
+   "id": "CAN06158520",
+   "name": "TORONTO ELLESMERE, CA",
+   "min": "1959-07-13",
+   "max": "1994-12-31",
+   "cov": 0.9675
+  }
+ ],
+ "coverage": {
+  "CAN06152695": {
+   "name": "GEORGETOWN WWTP, CA",
+   "http": 200,
+   "first": "1978-12-01",
+   "last": "2026-07-22",
+   "years_1970_2025_330plus": 20,
+   "short_years": {
+    "1978": 20,
+    "1979": 288,
+    "1980": 326,
+    "2001": 321,
+    "2002": 325,
+    "2003": 302,
+    "2004": 317,
+    "2005": 317,
+    "2006": 308,
+    "2007": 213,
+    "2008": 208,
+    "2009": 191,
+    "2010": 217,
+    "2011": 202,
+    "2012": 213,
+    "2013": 188,
+    "2014": 187,
+    "2015": 200,
+    "2016": 203,
+    "2017": 211,
+    "2018": 216,
+    "2019": 219,
+    "2020": 224,
+    "2021": 243,
+    "2022": 232,
+    "2023": 193,
+    "2024": 168,
+    "2025": 178,
+    "2026": 110
+   }
+  }
+ }
+}

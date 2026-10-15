@@ -1,0 +1,23 @@
+name: TEMP — station probe (throwaway branch)
+on:
+  push:
+    branches: [austin-real-data-check]
+    paths: [scripts_probe.py, .github/workflows/station-probe.yml]
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install "pandas>=2.2,<3" requests
+      - run: python scripts_probe.py
+        env:
+          NOAA_TOKEN: ${{ secrets.NOAA_TOKEN }}
+      - run: |
+          git config user.name "github-actions[bot]"; git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add probe_result.json; git commit -m "chore: probe result [skip ci]" || true
+          git pull --rebase origin austin-real-data-check; git push origin HEAD:austin-real-data-check

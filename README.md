@@ -20,7 +20,7 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 
 | Pipeline | Source | Output | Cadence |
 |---|---|---|---|
-| `climate_pipeline.py` | NOAA GHCN-Daily (21 stations) + humidity (AUS/IAH) | `public_data_climate_gold.json` | Daily |
+| `climate_pipeline.py` | NOAA GHCN-Daily (24 stations) + humidity (AUS/IAH) | `public_data_climate_gold.json` | Daily |
 | `hurricane_pipeline.py` | HURDAT2 · NOAA PSL SST · NASA GISTEMP | `public_data_hurricanes_gold.json` | Daily |
 | `sealevel_pipeline.py` | NOAA/STAR satellite altimetry | `public_data_sealevel_gold.json` | Daily |
 | `eia_grid_pipeline.py` | EIA API v2 (`ELETPUS`) | `public_data_us_grid_gold.json` | Daily |
@@ -30,7 +30,7 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 
 ### 🌡 Climate — the core pipeline
 
-**Bronze → Silver → Gold** across **21 NOAA stations**, 1970–present. **Austin is the home station**; Houston is kept as its reference:
+**Bronze → Silver → Gold** across **24 NOAA stations**, 1970–present. **Austin is the home station**; Houston is kept as its reference:
 
 | Code | Station | GHCN ID | Climate |
 |---|---|---|---|
@@ -55,6 +55,9 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 | MIA | Miami, FL | `USW00012839` | Tropical monsoon (Miami Intl) |
 | ATL | Atlanta, GA | `USW00013874` | Humid subtropical, ~1,000 ft (Hartsfield-Jackson) |
 | DCA | Washington, DC | `USW00013743` | Humid subtropical (Reagan National) |
+| MCO | Orlando, FL | `USW00012815` | Humid subtropical, inland Florida (Orlando Intl) |
+| ANC | Anchorage, AK | `USW00026451` | Subarctic, 61°N (Ted Stevens Intl) |
+| YYZ | Toronto, Canada | `CAN06158733` → `CAN06158731` | Humid continental (Pearson — stitched, see below) |
 
 #### 🏠 Austin vs Houston — winters and humidity
 
@@ -86,6 +89,10 @@ It queries NOAA's station catalog by country, filters to stations spanning 1970�
 #### 📦 Bulk fetches and the NOAA quota
 
 NOAA's CDO API allows 1,000 calls/day and is fetched one station-year per call, so a full 1970→present rebuild of 21 stations would need ~1,200 calls. Big fetches (the monthly `FULL_REFRESH` and a new station's first load) therefore go through NOAA's access-services API instead: the same GHCN-Daily records, one request per station, no token, no quota. The daily incremental (2 years per station) stays on CDO. Each path falls back to the other if it fails.
+
+#### 🧵 Toronto: one airport, two station IDs
+
+Environment Canada re-IDed Toronto Pearson on **2013-06-13** when it moved the site to automated observing: `CAN06158733` holds 1937 → 2013-06-12 and `CAN06158731` holds 2013-06-13 → now. Neither covers 1970–present alone, so the station config lists both as `segments` and `fetch_segmented` stitches them with non-overlapping date windows. If either segment fails to return, the fetch fails rather than publishing half a record. The change of instrumentation at the seam can introduce a small step, so treat Toronto's trend with that caveat — it's flagged in the station roster.
 
 #### 📉 Data-quality guards
 
@@ -120,7 +127,7 @@ From the current gold data (57 years, 1970–present):
 
 Two patterns hold across stations: **winter nighttime lows warm faster than annual averages** — a greenhouse-gas fingerprint distinct from urban heat island effects — and low-latitude cities show the sharpest growth in extreme-heat days.
 
-With 21 stations the dataset now spans a genuine climatic range: **Helsinki at 60°N** (high-latitude amplification, where warming should be fastest), through the **maritime European cluster** (Amsterdam, Brussels, Paris, London — sea-moderated, narrow seasonal swings), to **Mediterranean Rome**, **continental Chicago**, **coastal Los Angeles**, and **monsoon Delhi**. That spread is the point: the same regression run against very different climates.
+With 24 stations the dataset now spans a genuine climatic range: **Helsinki at 60°N** (high-latitude amplification, where warming should be fastest), through the **maritime European cluster** (Amsterdam, Brussels, Paris, London — sea-moderated, narrow seasonal swings), to **Mediterranean Rome**, **continental Chicago**, **coastal Los Angeles**, and **monsoon Delhi**. That spread is the point: the same regression run against very different climates.
 
 > Dashboard "Signal" lines are **computed from this gold data at render time**, not hardcoded — so no figure in the UI can drift from what the pipeline actually produced. Per-decade numbers for newly added stations populate on their first full run.
 

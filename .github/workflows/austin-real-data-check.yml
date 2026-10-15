@@ -3,6 +3,7 @@ name: TEMP — Austin real-data check (throwaway branch, no site push)
 on:
   push:
     branches: [austin-real-data-check]
+    paths-ignore: [scripts_probe.py, .github/workflows/station-probe.yml, probe_result.json]
 
 permissions:
   contents: write
