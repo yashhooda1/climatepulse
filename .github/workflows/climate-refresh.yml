@@ -2,9 +2,7 @@ name: ClimatePulse — daily data refresh
 
 on:
   schedule:
-    # Daily incremental skips the 1st: the full rebuild that day already costs
-    # ~17 stations × 57 years ≈ 970 of NOAA CDO's 1,000 calls/day.
-    - cron: '0 4 2-31 * *'
+    - cron: '0 4 * * *'
     - cron: '0 3 1 * *'      # 1st of month — full rebuild
   workflow_dispatch:
     inputs:
@@ -112,7 +110,7 @@ jobs:
           python3 -c "
           import json
           d = json.load(open('public_data_climate_gold.json'))
-          assert len(d['station_codes']) == 17, 'station count regression'
+          assert len(d['station_codes']) == 21, 'station count regression'
           assert d.get('home_station') == 'AUS', 'home station missing'
           assert len(d['AUS']['yearly']) > 50 and len(d['IAH']['yearly']) > 50 and len(d['EWR']['yearly']) > 50, 'core series truncated'
           if not (d.get('home_vs') or {}).get('humidity'):
