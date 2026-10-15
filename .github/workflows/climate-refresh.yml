@@ -110,7 +110,7 @@ jobs:
           python3 -c "
           import json
           d = json.load(open('public_data_climate_gold.json'))
-          assert len(d['station_codes']) == 21, 'station count regression'
+          assert len(d['station_codes']) == 24, 'station count regression'
           assert d.get('home_station') == 'AUS', 'home station missing'
           assert len(d['AUS']['yearly']) > 50 and len(d['IAH']['yearly']) > 50 and len(d['EWR']['yearly']) > 50, 'core series truncated'
           if not (d.get('home_vs') or {}).get('humidity'):

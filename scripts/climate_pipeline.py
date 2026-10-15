@@ -1,9 +1,10 @@
 """
 ClimatePulse v2 — Bronze → Silver → Gold pipeline
-21 stations: Austin (home), Houston, Newark, Delhi, London, Dallas, Denver,
+24 stations: Austin (home), Houston, Newark, Delhi, London, Dallas, Denver,
 Helsinki, Rome, Brussels, Paris, Amsterdam, Chicago, Los Angeles,
-San Francisco, Seattle, New York City, Boston, Miami, Atlanta, and
-Washington DC.
+San Francisco, Seattle, New York City, Boston, Miami, Atlanta,
+Washington DC, Orlando, Anchorage, and Toronto (stitched across a 2013
+station-ID change; see fetch_segmented).
 
 Big fetches (monthly FULL_REFRESH, a new station's first load) use NOAA's
 access-services API — one request per station, no CDO quota. The daily
@@ -193,6 +194,28 @@ STATIONS = {
         "metric":   False,
         "color":    "#e2e8f0",
     },
+    "MCO": {
+        "id":       "USW00012815",     # Orlando Intl
+        "name":     "Orlando, FL",
+        "metric":   False,
+        "color":    "#fdba74",
+    },
+    "ANC": {
+        "id":       "USW00026451",     # Ted Stevens Anchorage Intl
+        "name":     "Anchorage, AK",
+        "metric":   False,
+        "color":    "#7dd3fc",
+    },
+    "YYZ": {
+        # Toronto Pearson, one site under two IDs: Environment Canada re-IDed
+        # it on 2013-06-13. "id" is the live segment (cache key, roster).
+        "id":       "CAN06158731",
+        "segments": [("CAN06158733", None, "2013-06-12"),
+                     ("CAN06158731", "2013-06-13", None)],
+        "name":     "Toronto, Canada",
+        "metric":   True,
+        "color":    "#fca5a5",
+    },
 }
 
 DAILY_COLS = ["date", "year", "month", "tmax", "tmin", "tmean"]
@@ -200,7 +223,7 @@ DAILY_COLS = ["date", "year", "month", "tmax", "tmin", "tmean"]
 GHCN_COUNTRY = {
     "US": "United States", "UK": "United Kingdom", "NL": "Netherlands",
     "BE": "Belgium",       "FR": "France",         "IT": "Italy",
-    "FI": "Finland",       "IN": "India",
+    "FI": "Finland",       "IN": "India",          "CA": "Canada",
 }
  
 # Curated, human-readable context. Kept short: the UI shows this under the row.
@@ -215,6 +238,7 @@ STATION_NOTES = {
     "NYC": "Central Park — New York City's official record station.",
     "SFO": "San Francisco Intl — bayside airport, not downtown.",
     "DCA": "Reagan National — Washington DC's official record station.",
+    "YYZ": "Toronto Pearson — stitched across Environment Canada's 2013 ID change (CAN06158733 → CAN06158731).",
 }
  
 CATALOG_URL = ("https://www.ncei.noaa.gov/access/search/data-search/"
@@ -419,7 +443,34 @@ def fetch_bulk(station_cfg, years):
 BULK_MIN_YEARS = 3   # fetches longer than this go through fetch_bulk first
 
 
+def fetch_segmented(station_cfg, years):
+    """One physical site whose GHCN-D record is split across IDs (Toronto
+    Pearson: Environment Canada re-IDed it on 2013-06-13). Each segment is
+    (ghcn_id, first_date_or_None, last_date_or_None); rows outside a
+    segment's window are dropped so the pieces cannot overlap. A segment
+    that returns nothing makes the whole fetch fail — a silently
+    half-stitched record would read as real."""
+    lo, hi = f"{min(years)}-01-01", f"{max(years)}-12-31"
+    parts = []
+    for sid, start, end in station_cfg["segments"]:
+        s, e = max(lo, start or lo), min(hi, end or hi)
+        if s > e:
+            continue                      # segment outside the requested years
+        part = fetch_bulk({"id": sid}, list(range(int(s[:4]), int(e[:4]) + 1)))
+        if part is None:
+            print(f"    segment {sid} returned nothing — not stitching a partial record")
+            return None
+        d = pd.to_datetime(part["date"])
+        part = part[(d >= s) & (d <= e)]
+        print(f"    segment {sid}: {len(part)} records {s} → {e}")
+        parts.append(part)
+    return pd.concat(parts, ignore_index=True) if parts else None
+
+
 def fetch_noaa(station_cfg, years):
+    if station_cfg.get("segments"):
+        # Bulk-only: CDO's per-year fetch can't know which ID owns which dates.
+        return fetch_segmented(station_cfg, years)
     if len(years) > BULK_MIN_YEARS:
         bulk = fetch_bulk(station_cfg, years)
         if bulk is not None:
