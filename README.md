@@ -20,7 +20,7 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 
 | Pipeline | Source | Output | Cadence |
 |---|---|---|---|
-| `climate_pipeline.py` | NOAA GHCN-Daily (14 stations) + humidity (AUS/IAH) | `public_data_climate_gold.json` | Daily |
+| `climate_pipeline.py` | NOAA GHCN-Daily (17 stations) + humidity (AUS/IAH) | `public_data_climate_gold.json` | Daily |
 | `hurricane_pipeline.py` | HURDAT2 · NOAA PSL SST · NASA GISTEMP | `public_data_hurricanes_gold.json` | Daily |
 | `sealevel_pipeline.py` | NOAA/STAR satellite altimetry | `public_data_sealevel_gold.json` | Daily |
 | `eia_grid_pipeline.py` | EIA API v2 (`ELETPUS`) | `public_data_us_grid_gold.json` | Daily |
@@ -30,7 +30,7 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 
 ### 🌡 Climate — the core pipeline
 
-**Bronze → Silver → Gold** across **14 NOAA stations**, 1970–present. **Austin is the home station**; Houston is kept as its reference:
+**Bronze → Silver → Gold** across **17 NOAA stations**, 1970–present. **Austin is the home station**; Houston is kept as its reference:
 
 | Code | Station | GHCN ID | Climate |
 |---|---|---|---|
@@ -48,6 +48,9 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 | FCO | Rome, IT | `IT000016239` | Mediterranean (Ciampino) |
 | HEL | Helsinki, FI | `FI000000304` | Subarctic, 60°N (Kaisaniemi) |
 | DEL | Delhi, India | `IN022021900` | Semi-arid monsoon |
+| SFO | San Francisco, CA | `USW00023234` | Cool-summer Mediterranean, marine layer (SFO airport) |
+| SEA | Seattle, WA | `USW00024233` | Marine west coast (Sea-Tac) |
+| NYC | New York City, NY | `USW00094728` | Humid subtropical/continental edge (Central Park) |
 
 #### 🏠 Austin vs Houston — winters and humidity
 
@@ -109,7 +112,7 @@ From the current gold data (57 years, 1970–present):
 
 Two patterns hold across stations: **winter nighttime lows warm faster than annual averages** — a greenhouse-gas fingerprint distinct from urban heat island effects — and low-latitude cities show the sharpest growth in extreme-heat days.
 
-With 14 stations the dataset now spans a genuine climatic range: **Helsinki at 60°N** (high-latitude amplification, where warming should be fastest), through the **maritime European cluster** (Amsterdam, Brussels, Paris, London — sea-moderated, narrow seasonal swings), to **Mediterranean Rome**, **continental Chicago**, **coastal Los Angeles**, and **monsoon Delhi**. That spread is the point: the same regression run against very different climates.
+With 17 stations the dataset now spans a genuine climatic range: **Helsinki at 60°N** (high-latitude amplification, where warming should be fastest), through the **maritime European cluster** (Amsterdam, Brussels, Paris, London — sea-moderated, narrow seasonal swings), to **Mediterranean Rome**, **continental Chicago**, **coastal Los Angeles**, and **monsoon Delhi**. That spread is the point: the same regression run against very different climates.
 
 > Dashboard "Signal" lines are **computed from this gold data at render time**, not hardcoded — so no figure in the UI can drift from what the pipeline actually produced. Per-decade numbers for newly added stations populate on their first full run.
 
