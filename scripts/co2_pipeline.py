@@ -280,6 +280,7 @@ def station_analysis(gold, emis, ppm):
 
         row = {
             "code":            code,
+            "home":            code == gold.get("home_station"),
             "name":            blk["name"],
             "color":           blk["color"],
             "slope_annual":    blk["slope_annual"],       # °F/decade, from climate gold
@@ -397,6 +398,14 @@ def build_effects(emis, ppm, gist, glob, stations):
             basis="correlation", confidence="low",
             note=("single-station fits cannot separate CO2 from any other "
                   "monotonic trend — see collinearity"))
+
+    home = next((s for s in ranked if s.get("home")), None)
+    if home:
+        rank = ranked.index(home) + 1
+        add(id="local_home", label=f"Local warming per 1000 GtCO2 — {home['name']} (home)",
+            value=home["vs_cumulative_emissions"]["slope"], unit="°F per 1000 GtCO2",
+            r2=home["vs_cumulative_emissions"].get("r2"), rank=rank, n=len(ranked),
+            code=home["code"], basis="correlation", confidence="low")
 
     return eff
 
