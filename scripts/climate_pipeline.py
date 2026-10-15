@@ -1,7 +1,11 @@
 """
 ClimatePulse v2 — Bronze → Silver → Gold pipeline
-13 stations: Houston, Newark, Delhi, London, Dallas, Denver, Helsinki, Rome,
-Brussels, Paris, Amsterdam, Chicago, and Los Angeles.
+14 stations: Austin (home), Houston, Newark, Delhi, London, Dallas, Denver,
+Helsinki, Rome, Brussels, Paris, Amsterdam, Chicago, and Los Angeles.
+
+Austin and Houston also carry a humidity layer (dew point, mean RH, afternoon
+RH) from NOAA's access-services API, plus a computed Austin-vs-Houston block
+(`home_vs`) contrasting winters and moisture.
 
 Incremental by default: years <= STABLE_THROUGH are read from cache/*.parquet,
 only the trailing 2-year window is refetched from NOAA CDO. Set FULL_REFRESH=true
@@ -10,7 +14,7 @@ to ignore the cache and refetch 1970–present (runs monthly to pick up revision
 Writes public_data_climate_gold.json at repo root.
 """
 
-import os, sys, json, time, requests, numpy as np, pandas as pd
+import os, io, sys, json, time, requests, numpy as np, pandas as pd
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -41,12 +45,33 @@ NOAA_CALLS      = 0
 class QuotaExhausted(Exception):
     pass
 
+# Home station: drives the dashboard's KPI strip, default comparison and the
+# home_vs block. Houston stays as the reference it is contrasted against.
+HOME_STATION = "AUS"
+HOME_REF     = "IAH"
+
+# Humidity (ADPT/RHAV/RHMN) comes from NOAA's access-services API, not CDO:
+# no token, no 1,000/day quota, and one request covers the whole window. GHCN-D
+# only carries these elements for U.S. first-order sites from the late 2000s,
+# so asking for earlier years just returns blanks.
+HUMIDITY_URL   = "https://www.ncei.noaa.gov/access/services/data/v1"
+HUMIDITY_START = 2000
+HUMIDITY_COLS  = ["adpt", "rhav", "rhmn"]
+
 STATIONS = {
+    "AUS": {
+        "id":       "USW00013958",     # Camp Mabry — Austin's official record
+        "name":     "Austin, TX",
+        "metric":   False,
+        "color":    "#f97316",
+        "humidity": True,
+    },
     "IAH": {
         "id":       "USW00012960",
         "name":     "Houston, TX",
         "metric":   False,
         "color":    "#f87171",
+        "humidity": True,
     },
     "EWR": {
         "id":       "USW00014734",
@@ -132,6 +157,7 @@ GHCN_COUNTRY = {
  
 # Curated, human-readable context. Kept short: the UI shows this under the row.
 STATION_NOTES = {
+    "AUS": "Home station. Camp Mabry — Austin's official climate record since 1897.",
     "DEN": "GHCN-D record begins 1996 — 29 complete years vs 56 elsewhere.",
     "BRU": "Uccle: record since 1833, but 19 years rejected — trend fits 38 of 56.",
     "HEL": "Kaisaniemi, 60°N — the high-latitude amplification case.",
@@ -167,6 +193,7 @@ def build_station_roster(result):
         sid = blk["station"]
         roster.append({
             "code":            code,
+            "home":            code == HOME_STATION,
             "ghcn_id":         sid,
             "name":            blk["name"],
             "country":         GHCN_COUNTRY.get(sid[:2], sid[:2]),
@@ -393,6 +420,173 @@ def compute_heat_ytd(daily, latest_year):
         "partial":                True,
     }
 
+# ── Humidity layer (AUS + IAH) ───────────────────────────────────────────────
+def fetch_humidity(station_id):
+    """Daily dew point / RH since HUMIDITY_START. Returns a DataFrame with
+    date + HUMIDITY_COLS, or None. Fails soft: humidity is additive context and
+    must never take the temperature pipeline down with it."""
+    params = {
+        "dataset":   "daily-summaries",
+        "stations":  station_id,
+        "startDate": f"{HUMIDITY_START}-01-01",
+        "endDate":   datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "dataTypes": "ADPT,RHAV,RHMN",
+        "format":    "csv",
+        "units":     "standard",       # ADPT in °F
+    }
+    for attempt in range(3):
+        try:
+            r = requests.get(HUMIDITY_URL, params=params, timeout=90)
+            if r.status_code != 200:
+                print(f"    humidity HTTP {r.status_code} (attempt {attempt + 1})")
+                time.sleep(5 * (attempt + 1))
+                continue
+            df = pd.read_csv(io.StringIO(r.text))
+            df.columns = [c.strip().lower() for c in df.columns]
+            if df.empty or "date" not in df.columns:
+                return None
+            df["date"] = pd.to_datetime(df["date"])
+            for c in HUMIDITY_COLS:
+                df[c] = pd.to_numeric(df[c], errors="coerce") if c in df.columns else np.nan
+            # Physical guards: dew point °F, RH in percent
+            df.loc[(df["adpt"] < -40) | (df["adpt"] > 90), "adpt"] = np.nan
+            for c in ("rhav", "rhmn"):
+                df.loc[(df[c] < 0) | (df[c] > 100), c] = np.nan
+            df = df.dropna(subset=HUMIDITY_COLS, how="all")
+            return df[["date"] + HUMIDITY_COLS] if not df.empty else None
+        except Exception as e:
+            print(f"    humidity fetch failed (attempt {attempt + 1}): {e}")
+            time.sleep(5 * (attempt + 1))
+    return None
+
+
+def compute_humidity(hum):
+    """Gold humidity block: monthly climatology, per-winter (DJF) means and
+    seasonal summaries. Months need MIN_DAYS_PER_MONTH valid days to count."""
+    h = hum.copy()
+    h["year"]  = h["date"].dt.year
+    h["month"] = h["date"].dt.month
+
+    def r2(v):
+        return None if v is None or pd.isna(v) else round(float(v), 2)
+
+    monthly = []
+    for mo in range(1, 13):
+        md = h[h["month"] == mo]
+        monthly.append({
+            "month":     mo,
+            "avg_dewpt": r2(md["adpt"].mean()),
+            "avg_rh":    r2(md["rhav"].mean()),
+            "avg_rhmn":  r2(md["rhmn"].mean()),
+            "days":      int(md["adpt"].notna().sum()),
+        })
+
+    # Per-winter (DJF): Dec belongs to the following year's season, same as temps
+    w = h[h["month"].isin([12, 1, 2])].copy()
+    w["winter_year"] = w["year"] + (w["month"] == 12).astype(int)
+    per_month = (w.groupby(["winter_year", "month"])["adpt"].count()
+                  .unstack(fill_value=0))
+    ok = per_month[(per_month >= MIN_DAYS_PER_MONTH).sum(axis=1) == 3].index
+    wg = (w[w["winter_year"].isin(ok)].groupby("winter_year")
+            .agg(avg_dewpt=("adpt", "mean"), avg_rh=("rhav", "mean"),
+                 avg_rhmn=("rhmn", "mean")))
+    winters = [{"year": int(y), "avg_dewpt": r2(r.avg_dewpt),
+                "avg_rh": r2(r.avg_rh), "avg_rhmn": r2(r.avg_rhmn)}
+               for y, r in wg.iterrows()]
+
+    def season(months):
+        sd = h[h["month"].isin(months)]
+        return {"avg_dewpt": r2(sd["adpt"].mean()), "avg_rh": r2(sd["rhav"].mean()),
+                "avg_rhmn": r2(sd["rhmn"].mean())}
+
+    valid = h.dropna(subset=["adpt"])
+    return {
+        "record_start": valid["date"].min().strftime("%Y-%m-%d") if not valid.empty else None,
+        "record_end":   valid["date"].max().strftime("%Y-%m-%d") if not valid.empty else None,
+        "n_days":       int(len(valid)),
+        "monthly":      monthly,
+        "winters":      winters,
+        "djf":          season([12, 1, 2]),
+        "jja":          season([6, 7, 8]),
+        "units":        {"dewpt": "°F", "rh": "%"},
+    }
+
+
+def compare_home(home, ref):
+    """Austin-vs-Houston contrast, computed from the two gold blocks only, so
+    every number the dashboard shows traces back to this file. Diffs are
+    home minus ref (negative = Austin colder / drier)."""
+    def mean(xs):
+        xs = [x for x in xs if x is not None]
+        return round(float(np.mean(xs)), 2) if xs else None
+
+    def diff(a, b):
+        return None if a is None or b is None else round(a - b, 2)
+
+    out = {"home": HOME_STATION, "ref": HOME_REF,
+           "home_name": home["name"], "ref_name": ref["name"]}
+
+    # Winters (temperature) — overlapping complete DJF seasons only
+    hw = {r["year"]: r for r in home.get("winter") or []}
+    rw = {r["year"]: r for r in ref.get("winter") or []}
+    yrs = sorted(set(hw) & set(rw))
+    if yrs:
+        h_tmin = mean([hw[y]["avg_tmin"] for y in yrs])
+        r_tmin = mean([rw[y]["avg_tmin"] for y in yrs])
+        h_frz  = mean([hw[y].get("freeze_nights") for y in yrs])
+        r_frz  = mean([rw[y].get("freeze_nights") for y in yrs])
+        recent = yrs[-10:]
+        out["winter"] = {
+            "window": [yrs[0], yrs[-1]], "n": len(yrs),
+            "home_tmin": h_tmin, "ref_tmin": r_tmin, "tmin_diff": diff(h_tmin, r_tmin),
+            "home_freeze_nights": h_frz, "ref_freeze_nights": r_frz,
+            "freeze_ratio": (round(h_frz / r_frz, 1) if h_frz and r_frz else None),
+            "home_freeze_recent": mean([hw[y].get("freeze_nights") for y in recent]),
+            "ref_freeze_recent":  mean([rw[y].get("freeze_nights") for y in recent]),
+            "recent_window": [recent[0], recent[-1]],
+            "home_slope": home.get("slope_winter"), "ref_slope": ref.get("slope_winter"),
+        }
+
+    # Daily swing (tmax − tmin) — dry air cools faster at night
+    hy = {r["year"]: r for r in home.get("yearly") or []}
+    ry = {r["year"]: r for r in ref.get("yearly") or []}
+    yy = sorted(set(hy) & set(ry))
+    if yy:
+        h_rng = mean([hy[y]["avg_tmax"] - hy[y]["avg_tmin"] for y in yy])
+        r_rng = mean([ry[y]["avg_tmax"] - ry[y]["avg_tmin"] for y in yy])
+        last10 = yy[-10:]
+        out["annual"] = {
+            "window": [yy[0], yy[-1]], "n": len(yy),
+            "home_tmean": mean([hy[y]["avg_tmean"] for y in yy]),
+            "ref_tmean":  mean([ry[y]["avg_tmean"] for y in yy]),
+            "home_range": h_rng, "ref_range": r_rng, "range_diff": diff(h_rng, r_rng),
+            "home_heat_days_recent": mean([hy[y]["count_80f"] for y in last10]),
+            "ref_heat_days_recent":  mean([ry[y]["count_80f"] for y in last10]),
+            "recent_window": [last10[0], last10[-1]],
+        }
+
+    # Humidity — overlapping complete winters, plus summer climatology
+    hh, rh = home.get("humidity"), ref.get("humidity")
+    if hh and rh:
+        hwin = {r["year"]: r for r in hh.get("winters") or []}
+        rwin = {r["year"]: r for r in rh.get("winters") or []}
+        wy = sorted(set(hwin) & set(rwin))
+        hum = {"record_start": max(hh["record_start"] or "", rh["record_start"] or "") or None}
+        if wy:
+            for k in ("avg_dewpt", "avg_rh", "avg_rhmn"):
+                a, b = mean([hwin[y][k] for y in wy]), mean([rwin[y][k] for y in wy])
+                hum[f"djf_home_{k[4:]}"], hum[f"djf_ref_{k[4:]}"] = a, b
+                hum[f"djf_{k[4:]}_diff"] = diff(a, b)
+            hum["djf_window"], hum["djf_n"] = [wy[0], wy[-1]], len(wy)
+        for k in ("avg_dewpt", "avg_rh", "avg_rhmn"):
+            a, b = hh["jja"][k], rh["jja"][k]
+            hum[f"jja_home_{k[4:]}"], hum[f"jja_ref_{k[4:]}"] = a, b
+            hum[f"jja_{k[4:]}_diff"] = diff(a, b)
+        out["humidity"] = hum
+
+    return out
+
+
 def monthly_stats(yd):
     """Per-month aggregates for one calendar year."""
     return yd.groupby("month").agg(
@@ -489,18 +683,21 @@ def compute_gold(daily, station_cfg):
     wg = (w.groupby("winter_year")
             .agg(months=("month", "nunique"),
                  days=("tmin", "size"),
-                 avg_tmin=("tmin", "mean")))
+                 avg_tmin=("tmin", "mean"),
+                 # Freeze nights — the sharpest Austin/Houston winter contrast
+                 freeze_nights=("tmin", lambda s: int((s <= 32).sum()))))
     wg = wg[(wg["months"] == 3) & (wg["days"] >= 3 * MIN_DAYS_PER_MONTH)]
 
     if len(wg) > 1:
         wyr = (wg.reset_index()
-                 .rename(columns={"winter_year": "year"})[["year", "avg_tmin"]])
+                 .rename(columns={"winter_year": "year"})
+                 [["year", "avg_tmin", "freeze_nights"]])
         wx, wy       = np.array(wyr["year"], dtype=float), np.array(wyr["avg_tmin"])
         wm, _        = np.polyfit(wx - wx.mean(), wy, 1)
         wyr["trend"] = np.round(wm * (wx - wx.mean()) + wy.mean(), 2)
         slope_winter = round(float(wm) * 10, 3)
     else:
-        wyr, slope_winter = pd.DataFrame(columns=["year", "avg_tmin", "trend"]), 0.0
+        wyr, slope_winter = pd.DataFrame(columns=["year", "avg_tmin", "freeze_nights", "trend"]), 0.0
 
     good_years = set(ydf["year"])
     febmar = daily[daily["month"].isin([2, 3]) & daily["year"].isin(good_years)]
@@ -521,6 +718,7 @@ def compute_gold(daily, station_cfg):
             "avg_tmax":  round(float(md["tmax"].mean()),  2),
             "avg_tmin":  round(float(md["tmin"].mean()),  2),
             "avg_tmean": round(float(md["tmean"].mean()), 2),
+            "avg_range": round(float((md["tmax"] - md["tmin"]).mean()), 2),
         })
 
     return {
@@ -618,6 +816,23 @@ def main():
         yrs = sorted(daily["year"].unique())
         print(f"  {code}: {len(daily)} rows, {yrs[0]}–{yrs[-1]}")
 
+    # ── Humidity layer — separate API, fails soft per station ────────────────
+    for code, cfg in STATIONS.items():
+        if not cfg.get("humidity") or code not in result:
+            continue
+        print(f"\n── {code} humidity ──")
+        hum = fetch_humidity(cfg["id"])
+        if hum is not None:
+            result[code]["humidity"] = compute_humidity(hum)
+            hb = result[code]["humidity"]
+            print(f"  {hb['n_days']} days, {hb['record_start']} → {hb['record_end']}, "
+                  f"{len(hb['winters'])} complete winters")
+        else:
+            prev = ((existing or {}).get(code) or {}).get("humidity")
+            result[code]["humidity"] = prev
+            print("  no humidity this run — "
+                  + ("carrying forward previous block" if prev else "none available"))
+
     if not result:
         sys.exit("Nothing computed — aborting.")
 
@@ -664,6 +879,9 @@ def main():
     result["stale_stations"] = [c for c in STATIONS if result[c]["stale"]]
     result["generated_at"]   = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     result["station_codes"]  = list(STATIONS.keys())
+    result["home_station"]   = HOME_STATION
+    result["home_vs"]        = (compare_home(result[HOME_STATION], result[HOME_REF])
+                                if HOME_STATION in result and HOME_REF in result else None)
     result["stations"]         = build_station_roster(result)
     result["stations_summary"] = summarize_roster(result["stations"])
 

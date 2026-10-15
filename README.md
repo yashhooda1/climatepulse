@@ -20,7 +20,7 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 
 | Pipeline | Source | Output | Cadence |
 |---|---|---|---|
-| `climate_pipeline.py` | NOAA GHCN-Daily (13 stations) | `public_data_climate_gold.json` | Daily |
+| `climate_pipeline.py` | NOAA GHCN-Daily (14 stations) + humidity (AUS/IAH) | `public_data_climate_gold.json` | Daily |
 | `hurricane_pipeline.py` | HURDAT2 · NOAA PSL SST · NASA GISTEMP | `public_data_hurricanes_gold.json` | Daily |
 | `sealevel_pipeline.py` | NOAA/STAR satellite altimetry | `public_data_sealevel_gold.json` | Daily |
 | `eia_grid_pipeline.py` | EIA API v2 (`ELETPUS`) | `public_data_us_grid_gold.json` | Daily |
@@ -30,11 +30,12 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 
 ### 🌡 Climate — the core pipeline
 
-**Bronze → Silver → Gold** across **13 NOAA stations**, 1970–present:
+**Bronze → Silver → Gold** across **14 NOAA stations**, 1970–present. **Austin is the home station**; Houston is kept as its reference:
 
 | Code | Station | GHCN ID | Climate |
 |---|---|---|---|
-| IAH | Houston, TX | `USW00012960` | Humid subtropical |
+| **AUS** | **Austin, TX (home)** | `USW00013958` | Humid subtropical, drier inland edge (Camp Mabry) |
+| IAH | Houston, TX | `USW00012960` | Humid subtropical, Gulf Coast |
 | EWR | Newark, NJ | `USW00014734` | Humid continental |
 | DAL | Dallas, TX | `USW00013960` | Humid subtropical |
 | DEN | Denver, CO | `USW00003017` | Semi-arid, 5,280 ft |
@@ -47,6 +48,16 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 | FCO | Rome, IT | `IT000016239` | Mediterranean (Ciampino) |
 | HEL | Helsinki, FI | `FI000000304` | Subarctic, 60°N (Kaisaniemi) |
 | DEL | Delhi, India | `IN022021900` | Semi-arid monsoon |
+
+#### 🏠 Austin vs Houston — winters and humidity
+
+Austin (Camp Mabry) is the home station. Houston stays in the set as the contrast: same state, ~150 mi apart, but Austin sits inland off the Gulf moisture plume. The gold file carries a `home_vs` block computed from the two station series:
+
+- **Winters** — mean DJF night lows and **freeze nights** (Tmin ≤ 32°F) per winter, over every overlapping complete winter since 1970, plus the last 10 winters.
+- **Humidity** — dew point, mean RH and afternoon (minimum) RH for winter (DJF) and summer (JJA). Pulled from NOAA's access-services API (`ADPT`, `RHAV`, `RHMN`): no token, no CDO quota, one request per station. GHCN-D only carries these for U.S. first-order sites from the late 2000s, so the humidity window is shorter than the temperature one — the block reports its own start date.
+- **Daily swing** — mean Tmax − Tmin. Drier air radiates heat away faster at night, so a wider swing is the temperature-record signature of lower humidity.
+
+Humidity fails soft: if the API is down, the previous run's humidity block is carried forward and the temperature pipeline is unaffected.
 
 - **Bronze** — raw NOAA daily records, fetched year by year (`units=standard`, so NOAA returns °F for international stations too)
 - **Silver** — cleaned + feature-engineered: `tmean`, `winter_year`, 80°F-day flags, plus a sanity guard dropping physically impossible values
@@ -98,7 +109,7 @@ From the current gold data (57 years, 1970–present):
 
 Two patterns hold across stations: **winter nighttime lows warm faster than annual averages** — a greenhouse-gas fingerprint distinct from urban heat island effects — and low-latitude cities show the sharpest growth in extreme-heat days.
 
-With 13 stations the dataset now spans a genuine climatic range: **Helsinki at 60°N** (high-latitude amplification, where warming should be fastest), through the **maritime European cluster** (Amsterdam, Brussels, Paris, London — sea-moderated, narrow seasonal swings), to **Mediterranean Rome**, **continental Chicago**, **coastal Los Angeles**, and **monsoon Delhi**. That spread is the point: the same regression run against very different climates.
+With 14 stations the dataset now spans a genuine climatic range: **Helsinki at 60°N** (high-latitude amplification, where warming should be fastest), through the **maritime European cluster** (Amsterdam, Brussels, Paris, London — sea-moderated, narrow seasonal swings), to **Mediterranean Rome**, **continental Chicago**, **coastal Los Angeles**, and **monsoon Delhi**. That spread is the point: the same regression run against very different climates.
 
 > Dashboard "Signal" lines are **computed from this gold data at render time**, not hardcoded — so no figure in the UI can drift from what the pipeline actually produced. Per-decade numbers for newly added stations populate on their first full run.
 

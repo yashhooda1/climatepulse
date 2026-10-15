@@ -110,8 +110,11 @@ jobs:
           python3 -c "
           import json
           d = json.load(open('public_data_climate_gold.json'))
-          assert len(d['station_codes']) == 13, 'station count regression'
-          assert len(d['IAH']['yearly']) > 50 and len(d['EWR']['yearly']) > 50, 'core series truncated'
+          assert len(d['station_codes']) == 14, 'station count regression'
+          assert d.get('home_station') == 'AUS', 'home station missing'
+          assert len(d['AUS']['yearly']) > 50 and len(d['IAH']['yearly']) > 50 and len(d['EWR']['yearly']) > 50, 'core series truncated'
+          if not (d.get('home_vs') or {}).get('humidity'):
+              print('⚠ Austin/Houston humidity comparison unavailable this run')
           thin = {c: len(d[c]['yearly']) for c in d['station_codes']
                   if len(d[c]['yearly']) < 25 and d[c].get('trend_reliable', True)}
           assert not thin, f'short series: {thin}'
