@@ -1,6 +1,6 @@
 """
 ClimatePulse v2 — Bronze → Silver → Gold pipeline
-24 stations: Austin (home), Houston, Newark, Delhi, London, Dallas, Denver,
+24 stations: Houston (home), Austin, Newark, Delhi, London, Dallas, Denver,
 Helsinki, Rome, Brussels, Paris, Amsterdam, Chicago, Los Angeles,
 San Francisco, Seattle, New York City, Boston, Miami, Atlanta,
 Washington DC, Orlando, Anchorage, and Toronto (stitched across a 2013
@@ -11,7 +11,7 @@ access-services API — one request per station, no CDO quota. The daily
 incremental uses CDO; either falls back to the other.
 
 Austin and Houston also carry a humidity layer (dew point, mean RH, afternoon
-RH) from NOAA's access-services API, plus a computed Austin-vs-Houston block
+RH) from NOAA's access-services API, plus a computed Houston-vs-Austin block
 (`home_vs`) contrasting winters and moisture.
 
 Incremental by default: years <= STABLE_THROUGH are read from cache/*.parquet,
@@ -53,9 +53,9 @@ class QuotaExhausted(Exception):
     pass
 
 # Home station: drives the dashboard's KPI strip, default comparison and the
-# home_vs block. Houston stays as the reference it is contrasted against.
-HOME_STATION = "AUS"
-HOME_REF     = "IAH"
+# home_vs block. Austin stays as the reference it is contrasted against.
+HOME_STATION = "IAH"
+HOME_REF     = "AUS"
 
 # Humidity (ADPT/RHAV/RHMN) comes from NOAA's access-services API, not CDO:
 # no token, no 1,000/day quota, and one request covers the whole window. GHCN-D
@@ -228,7 +228,8 @@ GHCN_COUNTRY = {
  
 # Curated, human-readable context. Kept short: the UI shows this under the row.
 STATION_NOTES = {
-    "AUS": "Home station. Camp Mabry — Austin's official climate record since 1897.",
+    "IAH": "Home station. Bush Intercontinental — Houston's Gulf Coast record.",
+    "AUS": "Reference station. Camp Mabry — Austin's official climate record since 1897.",
     "DEN": "GHCN-D record begins 1996 — 29 complete years vs 56 elsewhere.",
     "BRU": "Uccle: record since 1833, but 19 years rejected — trend fits 38 of 56.",
     "HEL": "Kaisaniemi, 60°N — the high-latitude amplification case.",
@@ -664,9 +665,9 @@ def compute_humidity(hum):
 
 
 def compare_home(home, ref):
-    """Austin-vs-Houston contrast, computed from the two gold blocks only, so
+    """Home-vs-reference (Houston-vs-Austin) contrast, computed from the two gold blocks only, so
     every number the dashboard shows traces back to this file. Diffs are
-    home minus ref (negative = Austin colder / drier)."""
+    home minus ref (negative = Houston colder / drier)."""
     def mean(xs):
         xs = [x for x in xs if x is not None]
         return round(float(np.mean(xs)), 2) if xs else None

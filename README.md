@@ -30,12 +30,12 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 
 ### 🌡 Climate — the core pipeline
 
-**Bronze → Silver → Gold** across **24 NOAA stations**, 1970–present. **Austin is the home station**; Houston is kept as its reference:
+**Bronze → Silver → Gold** across **24 NOAA stations**, 1970–present. **Houston is the home station**; Austin is kept as its reference:
 
 | Code | Station | GHCN ID | Climate |
 |---|---|---|---|
-| **AUS** | **Austin, TX (home)** | `USW00013958` | Humid subtropical, drier inland edge (Camp Mabry) |
-| IAH | Houston, TX | `USW00012960` | Humid subtropical, Gulf Coast |
+| **IAH** | **Houston, TX (home)** | `USW00012960` | Humid subtropical, Gulf Coast |
+| AUS | Austin, TX | `USW00013958` | Humid subtropical, drier inland edge (Camp Mabry) |
 | EWR | Newark, NJ | `USW00014734` | Humid continental |
 | DAL | Dallas, TX | `USW00013960` | Humid subtropical |
 | DEN | Denver, CO | `USW00003017` | Semi-arid, 5,280 ft |
@@ -59,9 +59,9 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 | ANC | Anchorage, AK | `USW00026451` | Subarctic, 61°N (Ted Stevens Intl) |
 | YYZ | Toronto, Canada | `CAN06158733` → `CAN06158731` | Humid continental (Pearson — stitched, see below) |
 
-#### 🏠 Austin vs Houston — winters and humidity
+#### 🏠 Houston vs Austin — winters and humidity
 
-Austin (Camp Mabry) is the home station. Houston stays in the set as the contrast: same state, ~150 mi apart, but Austin sits inland off the Gulf moisture plume. The gold file carries a `home_vs` block computed from the two station series:
+Houston (IAH) is the home station. Austin (Camp Mabry) stays in the set as the contrast: same state, ~150 mi apart, but Austin sits inland off the Gulf moisture plume. The gold file carries a `home_vs` block computed from the two station series:
 
 - **Winters** — mean DJF night lows and **freeze nights** (Tmin ≤ 32°F) per winter, over every overlapping complete winter since 1970, plus the last 10 winters.
 - **Humidity** — dew point, mean RH and afternoon (minimum) RH for winter (DJF) and summer (JJA). Pulled from NOAA's access-services API (`ADPT`, `RHAV`, `RHMN`): no token, no CDO quota, one request per station. GHCN-D only carries these for U.S. first-order sites from the late 2000s, so the humidity window is shorter than the temperature one — the block reports its own start date.
