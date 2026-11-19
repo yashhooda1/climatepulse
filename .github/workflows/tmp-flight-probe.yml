@@ -1,25 +1,15 @@
-name: TEMP — flight feed probe (throwaway)
+name: TEMP — flights handler live test (throwaway)
 on:
   push:
     branches: [tmp/flight-probe]
 permissions:
   contents: read
 jobs:
-  probe:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          set +e
-          curl -sS -m 60 -D /tmp/h -o /tmp/os.json "https://opensky-network.org/api/states/all"
-          head -1 /tmp/h; grep -i "x-rate-limit" /tmp/h
-          python3 - <<'EOF'
-          import json
-          d=json.load(open('/tmp/os.json')); s=d.get('states') or []
-          air=[x for x in s if x[5] is not None and x[6] is not None and not x[8]]
-          print('time',d.get('time'),'states',len(s),'airborne w/ position',len(air))
-          print('sample',s[0] if s else None)
-          import collections
-          print('by region', collections.Counter(('NA' if -170<x[5]<-50 and x[6]>10 else 'EU' if -25<x[5]<45 and x[6]>35 else 'other') for x in air))
-          EOF
-          echo "--- adsb.lol routeset"
-          curl -sS -m 30 -X POST -H 'Content-Type: application/json' -d '{"planes":[{"callsign":"UAL1310","lat":37.4,"lng":-122.1}]}' -D /tmp/h2 -o /tmp/r.json https://api.adsb.lol/api/0/routeset; head -1 /tmp/h2; head -c 300 /tmp/r.json; echo
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: cd tmpflights && node run.mjs
