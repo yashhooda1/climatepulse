@@ -1,0 +1,25 @@
+name: TEMP — flight feed probe (throwaway)
+on:
+  push:
+    branches: [tmp/flight-probe]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          set +e
+          UA='YashHoodaPortfolio/1.0'
+          p(){ echo "=== $1"; curl -sS -m 30 -A "$UA" -H 'Accept: application/json' -D /tmp/h -o /tmp/b "$2"; echo "HTTP $(head -1 /tmp/h)"; grep -i -E "^(content-type|retry-after|x-ratelimit|location|server)" /tmp/h; python3 -c "
+          import json,sys
+          b=open('/tmp/b','rb').read()
+          try:
+              d=json.loads(b); print('json keys', list(d)[:8] if isinstance(d,dict) else type(d).__name__, 'ac', len(d.get('ac') or []) if isinstance(d,dict) else '', 'msg', d.get('msg') if isinstance(d,dict) else '')
+          except Exception: print('body', b[:300])"; }
+          p lol-dist800  "https://api.adsb.lol/v2/lat/30/lon/-95/dist/800"
+          p lol-dist250  "https://api.adsb.lol/v2/lat/30/lon/-95/dist/250"
+          p lol-point250 "https://api.adsb.lol/v2/point/30/-95/250"
+          p fi-dist250   "https://opendata.adsb.fi/api/v2/lat/30/lon/-95/dist/250"
+          p live-point   "https://api.airplanes.live/v2/point/30/-95/250"
+          p opensky      "https://opensky-network.org/api/states/all?lamin=28&lomin=-97&lamax=32&lomax=-93"
