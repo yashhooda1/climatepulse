@@ -42,6 +42,32 @@ TROPICAL     = {"TD", "TS", "HU", "SD", "SS"}  # stages RI is measured over
 # computed from HURDAT2 each run; the notes are curated from NHC reports and
 # peer-reviewed / rapid attribution studies, each with its source.
 FEATURED = {
+    "AL092008": {
+        "headline": "Hurricane Ike · Sep 2008",
+        "notes": [
+            {"text": "Made landfall on the north end of Galveston Island at 2:10 a.m. CDT on 13 September as a 95-kt "
+                     "Category 2 with a huge wind field. Surge was 15–20 ft on Bolivar Peninsula and 10–15 ft on "
+                     "Galveston Island and west Galveston Bay — a far bigger surge than its category suggests.",
+             "source": "NHC Tropical Cyclone Report AL092008",
+             "url": "https://www.nhc.noaa.gov/data/tcr/AL092008_Ike.pdf"},
+            {"text": "18 direct deaths in Texas, as many as 64 indirect, and 16 people still unaccounted for in 2011; "
+                     "about $29.5 billion in U.S. damage, then second only to Katrina. In Houston it blew out windows "
+                     "of the JPMorgan Chase Tower, and about 2.6 million customers lost power in Texas and Louisiana.",
+             "source": "NHC Tropical Cyclone Report AL092008",
+             "url": "https://www.nhc.noaa.gov/data/tcr/AL092008_Ike.pdf"},
+            {"text": "Climate signal: no attribution study has isolated warming's role in Ike itself. The clearest link "
+                     "is the water it struck from — Galveston Pier 21 has risen 6.6 mm a year since 1904 (about 2.2 ft "
+                     "per century), so a repeat of Ike's surge now starts several inches higher.",
+             "source": "NOAA Tides & Currents, Galveston Pier 21 (8771450)",
+             "url": "https://tidesandcurrents.noaa.gov/est/est_station.shtml?stnid=8771450"},
+            {"text": "Ike's legacy is the \"Ike Dike\": Congress authorized the Coastal Texas Project — a gate across "
+                     "Bolivar Roads plus dunes on Bolivar and west Galveston — in 2022 at about $34 billion. With "
+                     "inflation the Corps now puts it near $57 billion; preliminary engineering began in 2026.",
+             "source": "ConstructConnect (Feb 2026)",
+             "url": "https://news.constructconnect.com/massive-galveston-bay-barrier-system-moves-closer-to-construction-challenges-remain"},
+        ],
+        "caveat": "Ike's climate link here is the rising baseline its surge rode on, not attribution of the storm.",
+    },
     "AL092017": {
         "headline": "Hurricane Harvey · Aug 2017",
         "notes": [

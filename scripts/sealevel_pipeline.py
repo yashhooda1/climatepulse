@@ -10,6 +10,12 @@ reference values. Writes public_data_sealevel_gold.json at repo root. Stdlib onl
 Source: NOAA/NESDIS/STAR Laboratory for Satellite Altimetry
   https://www.star.nesdis.noaa.gov/socd/lsa/SeaLevelRise/slr/slr_sla_gbl_free_ref_90.csv
   "Altimetry data are provided by the NOAA Laboratory for Satellite Altimetry."
+
+Houston Coast block (live, NOAA CO-OPS — no key):
+  monthly mean sea level   https://api.tidesandcurrents.noaa.gov/api/prod/datagetter (product=monthly_mean)
+  official linear trends   .../dpapi/prod/webapi/product/sealvltrends.json
+  2022 local projections   .../dpapi/prod/webapi/product/slr_projections.json
+Fails soft per gauge; if CO-OPS is entirely down the Houston block is omitted.
 """
 
 import json, math, statistics, time, urllib.request
@@ -19,6 +25,83 @@ from datetime import datetime
 OUT_PATH  = Path(__file__).parent.parent / "public_data_sealevel_gold.json"
 STAR_URL  = "https://www.star.nesdis.noaa.gov/socd/lsa/SeaLevelRise/slr/slr_sla_gbl_free_ref_90.csv"
 UA        = "ClimatePulse/1.0 (portfolio analytics)"
+
+COOPS        = "https://api.tidesandcurrents.noaa.gov"
+COOPS_MONTHLY = (COOPS + "/api/prod/datagetter?begin_date={begin}0101&end_date={end}1231&station={sid}"
+                 "&product=monthly_mean&datum=MSL&units=metric&time_zone=gmt&format=json&application=ClimatePulse")
+COOPS_TRENDS = COOPS + "/dpapi/prod/webapi/product/sealvltrends.json?affil=US"
+COOPS_PROJ   = COOPS + "/dpapi/prod/webapi/product/slr_projections.json?station={sid}&report_year=2022"
+IKE_YEAR     = 2008
+MIN_MONTHS   = 10     # a year counts toward the annual series with >= 10 monthly means
+
+# Tide gauges for the Houston Coast tab. Galveston Pier 21 is one of the longest
+# U.S. records (1904–); Morgans Point sits where the Houston Ship Channel — the
+# dredged lower Buffalo Bayou — meets Galveston Bay; Eagle Point, on the west
+# shore of the bay, shows what subsidence adds on top of the Gulf's rise.
+HOUSTON_GAUGES = [
+    {"id": "8771450", "name": "Galveston Pier 21", "role": "Gulf entrance · record since 1904", "projections": True},
+    {"id": "8770613", "name": "Morgans Point",     "role": "Mouth of the Houston Ship Channel"},
+    {"id": "8771013", "name": "Eagle Point",       "role": "West Galveston Bay · subsiding shore"},
+]
+
+# Curated, sourced place notes. Numbers in the dashboard come from the gauges
+# above; these carry the context a gauge can't.
+HOUSTON_PLACES = [
+    {
+        "key": "galveston", "name": "Galveston Island", "gauge": "8771450",
+        "notes": [
+            {"text": "Ike put 10–15 ft of surge on Galveston Island and west Galveston Bay in 2008, and 15–20 ft across the "
+                     "channel on Bolivar Peninsula. Every inch the gauge gains is an inch the next surge starts from.",
+             "source": "NHC Tropical Cyclone Report AL092008",
+             "url": "https://www.nhc.noaa.gov/data/tcr/AL092008_Ike.pdf"},
+            {"text": "NOAA's 2022 report expects the western Gulf — Texas and Louisiana — to see the most sea-level rise of any "
+                     "U.S. coast, because the land there is subsiding while the sea rises.",
+             "source": "NOAA 2022 Sea Level Rise Technical Report, via Route Fifty",
+             "url": "https://www.route-fifty.com/management/2022/02/coastal-cities-expecting-greatest-sea-level-rise/362094"},
+            {"text": "The planned defense is the Coastal Texas Project (\"Ike Dike\"): a gate across Bolivar Roads plus dunes on Bolivar "
+                     "and west Galveston, authorized in 2022 and now estimated near $57 billion.",
+             "source": "ConstructConnect (Feb 2026)",
+             "url": "https://news.constructconnect.com/massive-galveston-bay-barrier-system-moves-closer-to-construction-challenges-remain"},
+        ],
+    },
+    {
+        "key": "buffalo_bayou", "name": "Buffalo Bayou & the Ship Channel", "gauge": "8770613",
+        "notes": [
+            {"text": "Buffalo Bayou is tidal well inland — downstream of a point just west of the Shepherd Drive bridge, through "
+                     "downtown and Allen's Landing to the Turning Basin, where it becomes the Ship Channel. A higher Gulf raises "
+                     "the baseline of that whole tidal reach.",
+             "source": "Buffalo Bayou — Wikipedia (USGS runs a tidal gauge at the Turning Basin, 08074710)",
+             "url": "https://en.wikipedia.org/wiki/Buffalo_Bayou"},
+            {"text": "Harvey showed how the bayou floods: water peaked 3 m above predicted at Buffalo Bayou's upper bay reach after "
+                     "a \"triple punch\" — ocean surge, then Buffalo Bayou runoff, then the San Jacinto. Higher mean sea level "
+                     "was one of the ocean-side factors.",
+             "source": "Valle-Levinson et al. 2020, Science of the Total Environment",
+             "url": "https://repository.library.noaa.gov/view/noaa/50032/noaa_50032_DS1.pdf"},
+            {"text": "The 52-mile Ship Channel is lined by 10 major refineries and dozens of chemical plants — and is also a "
+                     "conduit that can carry storm surge straight into a densely populated industrial corridor.",
+             "source": "ProPublica / Texas Tribune, \"Hell and High Water\"",
+             "url": "https://www.propublica.org/article/hell-and-high-water-text"},
+        ],
+    },
+    {
+        "key": "houston", "name": "Houston", "gauge": None,
+        "notes": [
+            {"text": "City officials say only a small portion of Houston is at risk for major storm surge. The exposure "
+                     "concentrates along the bay and the Ship Channel corridor — where surge and bayou flooding can combine, "
+                     "as they did in Harvey.",
+             "source": "ProPublica / Texas Tribune, \"Hell and High Water\"",
+             "url": "https://www.propublica.org/article/hell-and-high-water-text"},
+            {"text": "The land is sinking too. Groundwater pumping dropped some areas more than 9 ft within four decades, and "
+                     "Baytown's Brownwood subdivision lost so much elevation it was abandoned. Subsidence is irreversible.",
+             "source": "Harris-Galveston Subsidence District (Brownwood: ABC13 interview with HGSD, 2021)",
+             "url": "https://hgsubsidence.org/?p=646"},
+            {"text": "Sinking has moved inland with growth: Katy has subsided more than a foot in about two decades, the fastest "
+                     "rate in the region, as northwest Harris County still leans on groundwater.",
+             "source": "ABC13 / Harris-Galveston Subsidence District (May 2026)",
+             "url": "https://abc13.com/post/new-data-shows-houston-area-suburb-sinks-more-foot-decades/19095321/"},
+        ],
+    },
+]
 
 # Curated reference data (tide-gauge trends, ice equivalents, NOAA-2022 scenario targets)
 CURATED = {
@@ -241,6 +324,102 @@ def build_forecast(annual):
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
+# ── Houston Coast (NOAA CO-OPS tide gauges) ──────────────────────────────────
+def annual_msl(payload, min_months=MIN_MONTHS, current_year=None):
+    """CO-OPS monthly_mean JSON → {year: mean MSL in mm} for years with enough
+    months. Values are relative to the station's MSL datum (current epoch).
+    The year in progress needs all 12 months: Gulf water levels run high in
+    autumn, so a Jan–Oct mean would be biased."""
+    by_year = {}
+    for row in (payload or {}).get("data", []):
+        try:
+            by_year.setdefault(int(row["year"]), []).append(float(row["MSL"]) * 1000.0)
+        except (KeyError, TypeError, ValueError):
+            continue
+    return {y: round(statistics.mean(v), 1) for y, v in sorted(by_year.items())
+            if len(v) >= (12 if y == current_year else min_months)}
+
+
+def station_trend(payload, sid):
+    """Official linear relative-sea-level trend for one station from the
+    sealvltrends feed (which returns every U.S. station). → mm/yr dict or None."""
+    for s in (payload or {}).get("SeaLvlTrends", []):
+        if str(s.get("stationId")) != sid or s.get("trend") is None:
+            continue
+        per = 25.4 / 10.0 if "inch" in str(s.get("trendUnits", "")).lower() else 1.0
+        return {
+            "mm_yr": round(s["trend"] * per, 2),
+            "ci_mm_yr": round((s.get("trendError") or 0) * per, 2),
+            "ft_century": round(s["trend"] * per * 100 / 304.8, 2),
+            "start": s.get("startDate"), "end": s.get("endDate"),
+        }
+    return None
+
+
+def station_projections(payload):
+    """NOAA 2022 local projections → {scenario: [{year, m, lo, hi}]} in metres
+    above the 2005 baseline the report uses."""
+    out = {}
+    for p in (payload or {}).get("SlrProjections", []):
+        if p.get("projectionRsl") is None or p.get("projectionYear") is None:
+            continue
+        cm = 1.0 if str(p.get("units", "cm")).lower() == "cm" else 100.0
+        out.setdefault(p["scenario"], []).append({
+            "year": int(p["projectionYear"]),
+            "m": round(p["projectionRsl"] * cm / 100.0, 3),
+            "lo": round((p.get("projectionCiLow") or 0) * cm / 100.0, 3),
+            "hi": round((p.get("projectionCiHigh") or 0) * cm / 100.0, 3),
+        })
+    order = ["Low", "Intermediate-Low", "Intermediate", "Intermediate-High", "High"]
+    return {k: sorted(out[k], key=lambda r: r["year"]) for k in order if k in out}
+
+
+def build_houston(fetch, now_year):
+    """Live gauge data for the Houston Coast tab. Each gauge fails soft on its
+    own; returns None only if nothing at all came back."""
+    try:
+        trends = json.loads(fetch(COOPS_TRENDS))
+    except Exception as e:
+        print(f"  ⚠ CO-OPS trends unavailable: {e}")
+        trends = None
+    gauges = []
+    for g in HOUSTON_GAUGES:
+        rec = {k: g[k] for k in ("id", "name", "role")}
+        try:
+            annual = annual_msl(json.loads(fetch(COOPS_MONTHLY.format(begin=1900, end=now_year, sid=g["id"]))),
+                                current_year=now_year)
+        except Exception as e:
+            print(f"  ⚠ {g['name']} monthly means unavailable: {e}")
+            annual = {}
+        rec["annual"] = [{"year": y, "mm": v} for y, v in annual.items()]
+        rec["trend"] = station_trend(trends, g["id"])
+        if rec["trend"] and annual:
+            rate = rec["trend"]["mm_yr"]
+            last = max(annual)
+            # Rise implied by the official linear trend — steadier than
+            # differencing two noisy annual means.
+            rec["rise_since_ike_mm"] = round(rate * (last - IKE_YEAR), 0) if last > IKE_YEAR else None
+            rec["rise_since_start_mm"] = round(rate * (last - min(annual)), 0)
+        if g.get("projections"):
+            try:
+                rec["projections"] = station_projections(json.loads(fetch(COOPS_PROJ.format(sid=g["id"]))))
+            except Exception as e:
+                print(f"  ⚠ {g['name']} projections unavailable: {e}")
+        if rec["annual"] or rec["trend"]:
+            gauges.append(rec)
+            t = rec["trend"]["mm_yr"] if rec["trend"] else "—"
+            print(f"  {g['name']}: {len(rec['annual'])} yrs, trend {t} mm/yr")
+    if not gauges:
+        return None
+    return {
+        "source": "NOAA CO-OPS tide gauges (monthly mean sea level, official linear trends, 2022 local projections)",
+        "baseline_note": "Gauge levels are relative to each station's mean sea level datum; projections are metres above the 2005 baseline used by NOAA's 2022 report.",
+        "ike_year": IKE_YEAR,
+        "gauges": gauges,
+        "places": HOUSTON_PLACES,
+    }
+
+
 def main(fetch=_get):
     annual, star_trend = parse_star_csv(fetch(STAR_URL))
     yrs = sorted(annual)
@@ -265,6 +444,14 @@ def main(fetch=_get):
         "forecast": build_forecast(annual),
         "context": CURATED["context"],
     }
+
+    # Houston Coast: live gauges. Each gauge retries and fails soft on its own;
+    # if CO-OPS is entirely down the block is left out and the GMSL pipeline
+    # still publishes (the site shows a "next run" placeholder for the tab).
+    print("Houston Coast gauges:")
+    houston = build_houston(fetch, datetime.utcnow().year)
+    if houston:
+        result["houston"] = houston
 
     if len(gmsl["series"]) < 20:
         print("Too few years parsed — aborting."); return

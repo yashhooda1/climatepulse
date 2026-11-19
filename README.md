@@ -22,7 +22,7 @@ The data-engineering backend for [yashhooda.ai](https://www.yashhooda.ai) — si
 |---|---|---|---|
 | `climate_pipeline.py` | NOAA GHCN-Daily (24 stations) + humidity (AUS/IAH) | `public_data_climate_gold.json` | Daily |
 | `hurricane_pipeline.py` | HURDAT2 + NHC ATCF best track · NOAA PSL SST · NASA GISTEMP | `public_data_hurricanes_gold.json` | Daily |
-| `sealevel_pipeline.py` | NOAA/STAR satellite altimetry | `public_data_sealevel_gold.json` | Daily |
+| `sealevel_pipeline.py` | NOAA/STAR satellite altimetry + NOAA CO-OPS tide gauges | `public_data_sealevel_gold.json` | Daily |
 | `eia_grid_pipeline.py` | EIA API v2 (`ELETPUS`) | `public_data_us_grid_gold.json` | Daily |
 | `agent_context_pipeline.py` | Strava · GitHub | `agent_context_gold.json` | Weekly |
 | `agent_embed.py` | ↑ + OpenAI embeddings | Upstash Vector upsert | Weekly |
@@ -106,11 +106,17 @@ HURDAT2 storm records joined to tropical-Atlantic SST and global temperature; co
 - **Counts follow NHC convention:** a storm is named / hurricane / major on its peak wind while tropical or subtropical. Counting peaks from extratropical stages had over-counted some seasons (2025 showed 6 hurricanes; NHC's total is 5). Stages over East Pacific water are left out too: HURDAT2 keeps the full track of storms that cross Central America, and Bonnie 2022's Pacific major-hurricane stage had pushed 2022 to 9/3 and ACE 110 (NHC: 8/2, ACE 95). The divide follows the Pacific coastline, so a storm crossing land stays Atlantic.
 - **Current season:** HURDAT2 is reanalysed and published once a year, so seasons after its last year come from NHC's operational ATCF b-decks, flagged `preliminary` and excluded from every correlation until HURDAT2 replaces them. A b-deck outage only drops the preliminary season.
 - **1991–2020 normals** for named storms, hurricanes, majors and ACE, so a season can be read against NOAA's baseline.
-- **Featured Houston storms:** Harvey (2017) and Beryl (2024) — peak, pressure, fastest 24-h intensification, landfalls and season/SST rank computed from the best track, plus curated NHC and attribution-study notes with sources (`FEATURED` in the script).
+- **Featured Houston storms:** Ike (2008), Harvey (2017) and Beryl (2024) — peak, pressure, fastest 24-h intensification, landfalls and season/SST rank computed from the best track, plus curated NHC and attribution-study notes with sources (`FEATURED` in the script).
 - Tests: `python -m unittest discover -s tests -v` (synthetic HURDAT2 and b-deck text, no network).
 
 ### 🌊 Sea level
 NOAA/STAR satellite altimetry (GMSL since 1993), re-anchoring the 2100 projection fan to the latest observed rate. NOAA-2022 scenario targets (0.3–2.0 m) stay curated — they only change when NOAA issues a new technical report.
+
+**Houston Coast** (`houston` block) — live from NOAA CO-OPS, no key:
+- **Tide gauges:** Galveston Pier 21 (`8771450`, record since 1904), Morgans Point (`8770613`, mouth of the Houston Ship Channel) and Eagle Point (`8771013`, subsiding west shore of Galveston Bay). Annual mean sea level from monthly means (≥10 months; the year in progress needs all 12, since Gulf water runs high in autumn), plus NOAA's official linear trend and the rise since Hurricane Ike (2008) implied by it.
+- **Local projections:** NOAA's 2022 scenarios for Galveston Pier 21 (Low → High, metres above the 2005 baseline).
+- **Places:** curated, sourced notes for Galveston Island, Buffalo Bayou & the Ship Channel, and Houston (storm surge, tidal reach, compound flooding, subsidence).
+- Each gauge fails soft; if CO-OPS is entirely down the block is omitted and GMSL still publishes. Tests: `tests/test_sealevel_houston.py`.
 
 ### ⚡ U.S. grid + data centers
 The EIA feed keeps the *denominator* live (U.S. total net generation) so the Data Centers dashboard's "share of the grid" figure stays current. The data-center figures themselves are **curated by necessity** — no machine-readable feed exists (IEA/LBNL publish PDFs, CBRE is subscription). Rather than fake a pipeline that could inject wrong numbers, `dc_staleness_check.py` automates the *reminder*: it opens a GitHub issue when the figures pass a 6-month window or a source publishes a newer edition.
