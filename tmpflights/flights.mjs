@@ -134,6 +134,73 @@ async function fetchAdsbLol(shape) {
   return { flights: shape(all), total: all.length, source: 'adsb-lol' };
 }
 
+/* ------------------------------------------- routes via adsbdb (fallback) */
+// adsb.lol's routeset has been returning empty bodies (and its single-route
+// endpoint 503 "no healthy upstream"), so flights still missing a route are
+// looked up on adsbdb.com by callsign. Each answer — including "unknown" — is
+// cached in Redis for a day, and at most ROUTE_LOOKUPS_PER_REFRESH new
+// callsigns are fetched per refresh, so coverage fills in over a few refreshes.
+const ROUTE_LOOKUPS_PER_REFRESH = 40;
+const ROUTE_TTL = 86400;
+
+async function redisPipeline(commands) {
+  if (!R_URL || !R_TOK || !commands.length) return null;
+  try {
+    const r = await fetch(`${R_URL}/pipeline`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${R_TOK}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(commands),
+      signal: AbortSignal.timeout(4000),
+    });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
+function applyRoute(f, rt) {
+  if (!rt || !rt.o) return;
+  f.origin = rt.o.city || rt.o.name || rt.o.iata; f.origin_iata = rt.o.iata || null; f.origin_name = rt.o.name || null;
+  f.dest   = rt.d.city || rt.d.name || rt.d.iata; f.dest_iata   = rt.d.iata || null; f.dest_name   = rt.d.name || null;
+  if (!f.airline && rt.airline) { f.airline = rt.airline; f.airline_iata = f.airline_iata || rt.airline_iata || null; }
+}
+
+async function lookupAdsbdb(cs) {
+  const r = await fetch(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(cs)}`, {
+    headers: { 'User-Agent': UA_MOD, Accept: 'application/json' },
+    signal: AbortSignal.timeout(5000),
+  });
+  if (r.status === 404) return {};                 // unknown callsign: cache the miss
+  if (!r.ok) throw new Error(`adsbdb HTTP ${r.status}`);
+  const fr = ((await r.json()).response || {}).flightroute;
+  if (!fr || !fr.origin || !fr.destination) return {};
+  const ap = (a) => ({ iata: a.iata_code || a.icao_code || null, name: a.name || null, city: a.municipality || null });
+  return { o: ap(fr.origin), d: ap(fr.destination), airline: (fr.airline || {}).name || null, airline_iata: (fr.airline || {}).iata || null };
+}
+
+async function enrichFromAdsbdb(flights) {
+  const need = flights.filter(f => !f.origin_iata && !f.dest_iata && f.callsign && f.callsign !== f.icao && /^[A-Z]{3}\d/.test(f.callsign));
+  if (!need.length) return;
+  const keys = need.map(f => `flights:route:${f.callsign}`);
+  const cached = R_URL ? await redis(['MGET', ...keys]) : null;
+  const misses = [];
+  need.forEach((f, i) => {
+    const hit = Array.isArray(cached) ? cached[i] : null;
+    if (hit) { try { applyRoute(f, JSON.parse(hit)); } catch { /* ignore bad cache */ } }
+    else misses.push(f);
+  });
+  const batch = misses.slice(0, ROUTE_LOOKUPS_PER_REFRESH);
+  const writes = [];
+  for (let i = 0; i < batch.length; i += 5) {          // 5 at a time — be gentle with a free service
+    await Promise.all(batch.slice(i, i + 5).map(async f => {
+      try {
+        const rt = await lookupAdsbdb(f.callsign);
+        applyRoute(f, rt);
+        writes.push(['SET', `flights:route:${f.callsign}`, JSON.stringify(rt), 'EX', String(ROUTE_TTL)]);
+      } catch { /* transient: try again next refresh */ }
+    }));
+  }
+  await redisPipeline(writes);
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -261,8 +328,10 @@ export default async function handler(req, res) {
     const step = Math.max(1, Math.floor(shaped.length / MAX_MARKERS));
     const flights = shaped.filter((_, i) => i % step === 0).slice(0, MAX_MARKERS);
 
-    // Fill origin/destination for the markers we're actually showing.
+    // Fill origin/destination for the markers we're actually showing:
+    // adsb.lol routeset first, then adsbdb for whatever is still missing.
     await enrichRoutes(flights);
+    await enrichFromAdsbdb(flights);
 
     const payload = { flights, total: got.total, shown: flights.length, source: got.source, timestamp: Date.now() };
     if (R_URL) {
