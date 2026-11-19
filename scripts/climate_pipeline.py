@@ -10,9 +10,9 @@ Big fetches (monthly FULL_REFRESH, a new station's first load) use NOAA's
 access-services API — one request per station, no CDO quota. The daily
 incremental uses CDO; either falls back to the other.
 
-Austin and Houston also carry a humidity layer (dew point, mean RH, afternoon
-RH) from NOAA's access-services API, plus a computed Houston-vs-Austin block
-(`home_vs`) contrasting winters and moisture.
+Houston, New York City and Austin also carry a humidity layer (dew point, mean
+RH, afternoon RH) from NOAA's access-services API, plus a computed Houston-vs-
+New York City block (`home_vs`) contrasting winters and moisture.
 
 Incremental by default: years <= STABLE_THROUGH are read from cache/*.parquet,
 only the trailing 2-year window is refetched from NOAA CDO. Set FULL_REFRESH=true
@@ -53,9 +53,10 @@ class QuotaExhausted(Exception):
     pass
 
 # Home station: drives the dashboard's KPI strip, default comparison and the
-# home_vs block. Austin stays as the reference it is contrasted against.
+# home_vs block. New York City is the reference: the two largest U.S. cities,
+# Gulf Coast vs Northeast. Austin stays in the set as an ordinary station.
 HOME_STATION = "IAH"
-HOME_REF     = "AUS"
+HOME_REF     = "NYC"
 
 # Humidity (ADPT/RHAV/RHMN) comes from NOAA's access-services API, not CDO:
 # no token, no 1,000/day quota, and one request covers the whole window. GHCN-D
@@ -169,6 +170,7 @@ STATIONS = {
         "name":     "New York City, NY",
         "metric":   False,
         "color":    "#fde68a",
+        "humidity": True,              # reference station for home_vs
     },
     "BOS": {
         "id":       "USW00014739",     # Boston Logan
@@ -229,14 +231,14 @@ GHCN_COUNTRY = {
 # Curated, human-readable context. Kept short: the UI shows this under the row.
 STATION_NOTES = {
     "IAH": "Home station. Bush Intercontinental — Houston's Gulf Coast record.",
-    "AUS": "Reference station. Camp Mabry — Austin's official climate record since 1897.",
+    "AUS": "Camp Mabry — Austin's official climate record since 1897.",
     "DEN": "GHCN-D record begins 1996 — 29 complete years vs 56 elsewhere.",
     "BRU": "Uccle: record since 1833, but 19 years rejected — trend fits 38 of 56.",
     "HEL": "Kaisaniemi, 60°N — the high-latitude amplification case.",
     "FCO": "Ciampino: last complete year 2011, feed dead since Aug 2025.",
     "DEL": "0.79 coverage, 12 years rejected; NCEI relay dead since Aug 2025.",
     "LHR": "Swapped to UKE00105900 after the Heathrow feed thinned out.",
-    "NYC": "Central Park — New York City's official record station.",
+    "NYC": "Reference station. Central Park — New York City's official record station.",
     "SFO": "San Francisco Intl — bayside airport, not downtown.",
     "DCA": "Reagan National — Washington DC's official record station.",
     "YYZ": "Toronto Pearson — stitched across Environment Canada's 2013 ID change (CAN06158733 → CAN06158731); the pre-2013 ID alone gives an even steeper trend, so the seam isn't driving it.",
@@ -665,7 +667,7 @@ def compute_humidity(hum):
 
 
 def compare_home(home, ref):
-    """Home-vs-reference (Houston-vs-Austin) contrast, computed from the two gold blocks only, so
+    """Home-vs-reference (Houston-vs-New York City) contrast, computed from the two gold blocks only, so
     every number the dashboard shows traces back to this file. Diffs are
     home minus ref (negative = Houston colder / drier)."""
     def mean(xs):
