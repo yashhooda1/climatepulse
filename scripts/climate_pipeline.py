@@ -999,15 +999,36 @@ def main():
 
     # ── Freshness audit ──────────────────────────────────────────────────────
     today, unexpected, regressed = datetime.now(timezone.utc).date(), [], []
+
+    def last_date_of(blk):
+        return ((blk.get("ytd") or blk.get("heat_ytd") or {}).get("last_date")
+                or f"{blk['yearly'][-1]['year']}-12-31")
+
+    # U.S. stations are judged against the U.S. network head (the freshest U.S.
+    # station), not against today. When NOAA stops publishing for everyone at
+    # once — e.g. the NCEI cloud migration that froze GHCN-Daily at mid-Nov 2026 —
+    # every U.S. station crosses MAX_LAG_US on the same day and the dashboard
+    # would flag 20 healthy cities red. That is one upstream event, reported
+    # once in `upstream`, not 20 station faults. A single dead U.S. feed still
+    # trips: it falls behind the stations that are still reporting.
+    us_codes = [c for c in STATIONS if STATIONS[c]["id"].startswith("USW")]
+    us_head  = max((last_date_of(result[c]) for c in us_codes), default=None)
+    us_head_d = datetime.strptime(us_head, "%Y-%m-%d").date() if us_head else today
+    us_head_lag = (today - us_head_d).days
+    upstream_delayed = us_head_lag > MAX_LAG_US
+
     for code in STATIONS:
         blk  = result[code]
-        last = ((blk.get("ytd") or blk.get("heat_ytd") or {}).get("last_date")
-                or f"{blk['yearly'][-1]['year']}-12-31")
-        lag  = (today - datetime.strptime(last, "%Y-%m-%d").date()).days
+        last = last_date_of(blk)
+        last_d = datetime.strptime(last, "%Y-%m-%d").date()
+        lag  = (today - last_d).days
         blk["last_data_date"] = last
         blk["lag_days"]       = lag
-        threshold             = MAX_LAG_US if STATIONS[code]["id"].startswith("USW") else MAX_LAG_DAYS
-        blk["stale"]          = lag > threshold
+        if code in us_codes:
+            blk["behind_network_days"] = (us_head_d - last_d).days
+            blk["stale"] = blk["behind_network_days"] > MAX_LAG_US
+        else:
+            blk["stale"] = lag > MAX_LAG_DAYS
         if blk["stale"] and code not in KNOWN_STALE:
             unexpected.append(f"{code} ({last}, {lag}d)")
 
@@ -1032,6 +1053,12 @@ def main():
                                       key=lambda c: result[c]["last_data_date"])
                                   if fresh_codes else None)
     result["stale_stations"] = [c for c in STATIONS if result[c]["stale"]]
+    result["upstream"] = {
+        "us_network_through": us_head,
+        "lag_days":           us_head_lag,
+        "delayed":            upstream_delayed,
+        "threshold_days":     MAX_LAG_US,
+    }
     result["generated_at"]   = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     result["station_codes"]  = list(STATIONS.keys())
     result["home_station"]   = HOME_STATION
@@ -1060,6 +1087,15 @@ def main():
     if unexpected:
         msg = "NEW STALE STATIONS: " + ", ".join(unexpected)
         print(f"::warning title=New stale stations::{msg}")
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with open(summary, "a") as fh:
+                fh.write(f"### ⚠ {msg}\n")
+
+    if upstream_delayed:
+        msg = (f"NOAA UPSTREAM DELAY — no U.S. station has data after {us_head} "
+               f"({us_head_lag}d). NOAA/NCEI publishing has stalled; the pipeline is fine.")
+        print(f"::warning title=NOAA upstream delay::{msg}")
         summary = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary:
             with open(summary, "a") as fh:
